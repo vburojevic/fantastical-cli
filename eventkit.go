@@ -21,7 +21,6 @@ type eventKitCalendarsOptions struct {
 	plain   bool
 	verbose bool
 	noInput bool
-	config  string
 }
 
 type eventKitEventsOptions struct {
@@ -35,7 +34,6 @@ type eventKitEventsOptions struct {
 	limit           int
 	includeAllDay   bool
 	includeDeclined bool
-	config          string
 }
 
 func eventKitUsage(w io.Writer) {
@@ -52,7 +50,6 @@ func newEventKitCalendarsFlagSet(w io.Writer) (*flag.FlagSet, *eventKitCalendars
 	fs.BoolVar(&opts.plain, "plain", false, "Print stable plain-text output")
 	fs.BoolVar(&opts.noInput, "no-input", false, "Do not prompt for Calendar access")
 	fs.BoolVar(&opts.verbose, "verbose", false, "Verbose output to stderr")
-	fs.StringVar(&opts.config, "config", "", "Config file path (reserved)")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical eventkit calendars [flags]\n")
@@ -78,7 +75,6 @@ func newEventKitEventsFlagSet(w io.Writer) (*flag.FlagSet, *eventKitEventsOption
 	fs.IntVar(&opts.limit, "limit", 0, "Limit number of events returned")
 	fs.BoolVar(&opts.includeAllDay, "include-all-day", true, "Include all-day events")
 	fs.BoolVar(&opts.includeDeclined, "include-declined", false, "Include declined events")
-	fs.StringVar(&opts.config, "config", "", "Config file path (reserved)")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical eventkit events [flags]\n")
