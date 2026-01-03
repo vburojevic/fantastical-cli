@@ -16,13 +16,13 @@ After the first tagged release:
 
 ```sh
 brew tap vburojevic/fantastical-cli
-brew install fantastical
+brew install fantastical-cli
 ```
 
 Until then, install the latest commit:
 
 ```sh
-brew install --HEAD fantastical
+brew install --HEAD fantastical-cli
 ```
 
 ### Go install

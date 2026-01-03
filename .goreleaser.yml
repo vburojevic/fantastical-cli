@@ -23,7 +23,7 @@ archives:
       - LICENSE
 
 brews:
-  - name: fantastical
+  - name: fantastical-cli
     description: "CLI for Fantastical URL handler and AppleScript"
     homepage: "https://github.com/vburojevic/fantastical-cli"
     license: "MIT"
