@@ -215,14 +215,22 @@ func ensureEventKitHelper(errOut io.Writer, verbose bool) (string, error) {
 		return "", fmt.Errorf("eventkit cache dir: %w", err)
 	}
 
+	cacheRoot := filepath.Join(cacheDir, "fantastical")
+	helperPath := filepath.Join(cacheRoot, "eventkit-helper")
+	sourcePath := filepath.Join(cacheRoot, "eventkit-helper.swift")
+	hashPath := filepath.Join(cacheRoot, "eventkit-helper.hash")
+
 	hash := sha256.Sum256([]byte(eventKitHelperSource))
 	hashStr := hex.EncodeToString(hash[:8])
-	cacheRoot := filepath.Join(cacheDir, "fantastical")
-	helperPath := filepath.Join(cacheRoot, "eventkit-helper-"+hashStr)
-	sourcePath := filepath.Join(cacheRoot, "eventkit-helper-"+hashStr+".swift")
 
 	if _, err := os.Stat(helperPath); err == nil {
-		return helperPath, nil
+		if current, err := os.ReadFile(hashPath); err == nil && strings.TrimSpace(string(current)) == hashStr {
+			return helperPath, nil
+		}
+	}
+
+	if _, err := os.Stat(helperPath); err == nil {
+		logVerbose(errOut, verbose, "eventkit helper hash mismatch; recompiling")
 	}
 
 	if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
@@ -236,6 +244,8 @@ func ensureEventKitHelper(errOut io.Writer, verbose bool) (string, error) {
 	if compileErr != nil {
 		return "", compileErr
 	}
+
+	_ = os.WriteFile(hashPath, []byte(hashStr+"\n"), 0o644)
 
 	return helperPath, nil
 }
