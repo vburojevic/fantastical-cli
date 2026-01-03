@@ -62,8 +62,10 @@ fantastical show --view month 2026-01-03
 fantastical show --calendar-set "Work"
 fantastical validate show month 2026-01-03
 fantastical doctor --json
+fantastical eventkit status --json
 fantastical eventkit calendars --json
-fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
+fantastical eventkit events --next-week --calendar "Work"
+fantastical eventkit events --days 7 --query "standup"
 fantastical greta --format json
 fantastical help --json parse
 fantastical man --format json

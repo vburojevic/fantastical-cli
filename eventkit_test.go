@@ -13,7 +13,7 @@ import (
 
 func TestCmdEventKitCalendarsHelperOverride(t *testing.T) {
 	helper := filepath.Join(t.TempDir(), "helper.sh")
-	script := "#!/bin/sh\necho calendars-ok\n"
+	script := "#!/bin/sh\nprintf '%s\n' \"$@\"\n"
 	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
@@ -23,8 +23,12 @@ func TestCmdEventKitCalendarsHelperOverride(t *testing.T) {
 	if err := cmdEventKit([]string{"calendars", "--plain"}, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.String() != "calendars-ok\n" {
-		t.Fatalf("unexpected output: %q", out.String())
+	output := out.String()
+	if !strings.Contains(output, "calendars") {
+		t.Fatalf("expected subcommand in output: %q", output)
+	}
+	if !strings.Contains(output, "--format") || !strings.Contains(output, "plain") {
+		t.Fatalf("expected format in output: %q", output)
 	}
 }
 
@@ -37,7 +41,7 @@ func TestCmdEventKitEventsArgs(t *testing.T) {
 	t.Setenv("FANTASTICAL_EVENTKIT_HELPER", helper)
 
 	var out, errOut bytes.Buffer
-	args := []string{"events", "--json", "--calendar", "Work", "--from", "2026-01-03"}
+	args := []string{"events", "--format", "json", "--calendar", "Work", "--calendar-id", "abc123", "--from", "2026-01-03", "--sort", "title", "--query", "standup"}
 	if err := cmdEventKit(args, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,8 +52,17 @@ func TestCmdEventKitEventsArgs(t *testing.T) {
 	if !strings.Contains(output, "--calendar") || !strings.Contains(output, "Work") {
 		t.Fatalf("expected calendar args in output: %q", output)
 	}
+	if !strings.Contains(output, "--calendar-id") || !strings.Contains(output, "abc123") {
+		t.Fatalf("expected calendar-id args in output: %q", output)
+	}
 	if !strings.Contains(output, "--from") || !strings.Contains(output, "2026-01-03") {
 		t.Fatalf("expected from args in output: %q", output)
+	}
+	if !strings.Contains(output, "--sort") || !strings.Contains(output, "title") {
+		t.Fatalf("expected sort args in output: %q", output)
+	}
+	if !strings.Contains(output, "--query") || !strings.Contains(output, "standup") {
+		t.Fatalf("expected query args in output: %q", output)
 	}
 }
 
@@ -60,5 +73,23 @@ func TestCmdEventKitMissingSubcommand(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "USAGE") {
 		t.Fatalf("expected usage in stderr: %q", errOut.String())
+	}
+}
+
+func TestCmdEventKitStatusArgs(t *testing.T) {
+	helper := filepath.Join(t.TempDir(), "helper.sh")
+	script := "#!/bin/sh\nprintf '%s\n' \"$@\"\n"
+	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+	t.Setenv("FANTASTICAL_EVENTKIT_HELPER", helper)
+
+	var out, errOut bytes.Buffer
+	if err := cmdEventKit([]string{"status", "--format", "json"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "status") || !strings.Contains(output, "--format") || !strings.Contains(output, "json") {
+		t.Fatalf("expected status args in output: %q", output)
 	}
 }

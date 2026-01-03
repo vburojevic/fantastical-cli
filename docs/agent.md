@@ -18,7 +18,9 @@ This CLI is designed to be discoverable and safe for AI agents (Codex, Claude Co
   - Human-readable walkthroughs.
 - `fantastical eventkit calendars --json`
   - List system calendars (requires Calendar permission).
-- `fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"`
+- `fantastical eventkit status --json`
+  - Check Calendar authorization state without prompting.
+- `fantastical eventkit events --next-week --calendar "Work"`
   - List events for a date range (requires Calendar permission).
 
 ## Safe validation
@@ -43,6 +45,7 @@ Use `--json` with `parse`, `show`, `validate`, and `doctor` for machine-readable
 - For `parse`/`applescript`, put flags before the sentence or use `--` to separate.
 - `eventkit` commands use EventKit and will prompt for Calendar access on first use.
 - The EventKit helper is compiled with `swiftc` on first use (requires Xcode Command Line Tools).
+- Use `--format` for table output, `--query` to filter, and `--calendar-id` for stable selection.
 
 Example:
 

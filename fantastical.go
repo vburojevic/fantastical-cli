@@ -138,8 +138,9 @@ EXAMPLES
   fantastical show month 2026-01-03
   fantastical show set "My Calendar Set"
   fantastical applescript --add "Wake up at 8am"
+  fantastical eventkit status --json
   fantastical eventkit calendars --json
-  fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
+  fantastical eventkit events --next-week --calendar "Work"
   fantastical greta --format json
   fantastical help --json parse
   fantastical explain parse
@@ -1098,17 +1099,27 @@ func gretaSpec(schema string) map[string]any {
 			{
 				"name":        "eventkit",
 				"description": "List calendars or events via EventKit",
-				"args":        "calendars|events [flags]",
+				"args":        "status|calendars|events [flags]",
 				"flags": []string{
+					"--format plain|json|table",
 					"--json",
 					"--plain",
 					"--no-input",
 					"--calendar",
+					"--calendar-id",
 					"--from",
 					"--to",
+					"--days",
+					"--today",
+					"--tomorrow",
+					"--this-week",
+					"--next-week",
 					"--limit",
 					"--include-all-day",
 					"--include-declined",
+					"--sort start|end|title|calendar",
+					"--tz IANA",
+					"--query text",
 				},
 			},
 			{
@@ -1243,8 +1254,12 @@ func gretaExamples(schema string) map[string]any {
 				"command":     `fantastical eventkit calendars --json`,
 			},
 			{
+				"description": "Check EventKit authorization status",
+				"command":     `fantastical eventkit status --json`,
+			},
+			{
 				"description": "List events for a date range via EventKit",
-				"command":     `fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"`,
+				"command":     `fantastical eventkit events --next-week --calendar "Work"`,
 			},
 		},
 	}
@@ -1267,8 +1282,10 @@ func gretaExamplesMarkdown() string {
   fantastical doctor --json
 - List calendars via EventKit:
   fantastical eventkit calendars --json
+- Check EventKit authorization status:
+  fantastical eventkit status --json
 - List events for a date range via EventKit:
-  fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
+  fantastical eventkit events --next-week --calendar "Work"
 `
 }
 
@@ -1376,11 +1393,13 @@ If AppleScript fails, grant Terminal Automation permission.`, nil
 		return `eventkit lists calendars or events via EventKit (system Calendar access).
 
 Examples:
-  fantastical eventkit calendars --json
-  fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
+  fantastical eventkit status --json
+  fantastical eventkit calendars --format table
+  fantastical eventkit events --next-week --calendar "Work"
 
 Note:
-  macOS will prompt for Calendar access on first use. Use --no-input to fail instead of prompting.`, nil
+  macOS will prompt for Calendar access on first use. Use --no-input to fail instead of prompting.
+  Use --format to select plain/json/table output and --query to filter events.`, nil
 	case "greta":
 		return `greta outputs a full CLI spec for AI agents.
 
@@ -1732,19 +1751,24 @@ func bashCompletion() string {
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     eventkit)
-      local subs="calendars events"
+      local subs="status calendars events"
       if [[ $COMP_CWORD -eq 2 ]]; then
         COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
         return 0
       fi
       local sub="${COMP_WORDS[2]}"
+      if [[ "$sub" == "status" ]]; then
+        local flags="--format --json --plain --verbose --help"
+        COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+        return 0
+      fi
       if [[ "$sub" == "calendars" ]]; then
-        local flags="--json --plain --no-input --verbose --help"
+        local flags="--format --json --plain --no-input --verbose --help"
         COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
         return 0
       fi
       if [[ "$sub" == "events" ]]; then
-        local flags="--json --plain --no-input --verbose --calendar --from --to --limit --include-all-day --include-declined --help"
+        local flags="--format --json --plain --no-input --verbose --calendar --calendar-id --from --to --days --today --tomorrow --this-week --next-week --limit --include-all-day --include-declined --sort --tz --query --help"
         COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
         return 0
       fi
@@ -1866,12 +1890,20 @@ _fantastical() {
           ;;
         eventkit)
           if (( CURRENT == 3 )); then
-            _arguments '1:sub:(calendars events)'
+            _arguments '1:sub:(status calendars events)'
             return
           fi
           case $words[3] in
+            status)
+              _arguments \
+                '--format[Output format (plain|json)]' \
+                '--json[JSON output]' \
+                '--plain[Plain output]' \
+                '--verbose[Verbose output]'
+              ;;
             calendars)
               _arguments \
+                '--format[Output format (plain|json|table)]' \
                 '--json[JSON output]' \
                 '--plain[Plain output]' \
                 '--no-input[Do not prompt for access]' \
@@ -1879,19 +1911,29 @@ _fantastical() {
               ;;
             events)
               _arguments \
+                '--format[Output format (plain|json|table)]' \
                 '--json[JSON output]' \
                 '--plain[Plain output]' \
                 '--no-input[Do not prompt for access]' \
                 '--verbose[Verbose output]' \
                 '--calendar[Calendar name]' \
+                '--calendar-id[Calendar identifier]' \
                 '--from[Start date/time]' \
                 '--to[End date/time]' \
+                '--days[Days from now]' \
+                '--today[Today]' \
+                '--tomorrow[Tomorrow]' \
+                '--this-week[This week]' \
+                '--next-week[Next week]' \
                 '--limit[Limit events]' \
                 '--include-all-day[Include all-day events]' \
-                '--include-declined[Include declined events]'
+                '--include-declined[Include declined events]' \
+                '--sort[Sort order]' \
+                '--tz[Timezone]' \
+                '--query[Query text]'
               ;;
             *)
-              _arguments '1:sub:(calendars events)'
+              _arguments '1:sub:(status calendars events)'
               ;;
           esac
           ;;
@@ -1970,17 +2012,27 @@ complete -c fantastical -n '__fish_seen_subcommand_from validate' -a 'parse show
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l json -d 'JSON output'
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l skip-app -d 'Skip app check'
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l verbose -d 'Verbose output'
-complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -a 'calendars events' -d 'EventKit target'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -a 'status calendars events' -d 'EventKit target'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l json -d 'JSON output'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l plain -d 'Plain output'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l format -d 'Output format'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l no-input -d 'Do not prompt for access'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l verbose -d 'Verbose output'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l calendar -d 'Calendar name'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l calendar-id -d 'Calendar identifier'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l from -d 'Start date/time'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l to -d 'End date/time'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l days -d 'Days from now'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l today -d 'Today'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l tomorrow -d 'Tomorrow'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l this-week -d 'This week'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l next-week -d 'Next week'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l limit -d 'Limit events'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l include-all-day -d 'Include all-day events'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l include-declined -d 'Include declined events'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l sort -d 'Sort order'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l tz -d 'Timezone'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l query -d 'Query text'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l format -d 'Format'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l schema -d 'Schema'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l examples -d 'Examples only'

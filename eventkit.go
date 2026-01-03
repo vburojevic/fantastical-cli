@@ -17,6 +17,7 @@ import (
 )
 
 type eventKitCalendarsOptions struct {
+	format  string
 	json    bool
 	plain   bool
 	verbose bool
@@ -24,21 +25,38 @@ type eventKitCalendarsOptions struct {
 }
 
 type eventKitEventsOptions struct {
+	format          string
 	json            bool
 	plain           bool
 	verbose         bool
 	noInput         bool
 	calendars       stringSlice
+	calendarIDs     stringSlice
 	from            string
 	to              string
+	days            int
+	today           bool
+	tomorrow        bool
+	thisWeek        bool
+	nextWeek        bool
 	limit           int
 	includeAllDay   bool
 	includeDeclined bool
+	sort            string
+	timezone        string
+	query           string
+}
+
+type eventKitStatusOptions struct {
+	format  string
+	json    bool
+	plain   bool
+	verbose bool
 }
 
 func eventKitUsage(w io.Writer) {
-	fmt.Fprint(w, "USAGE:\n  fantastical eventkit calendars [flags]\n  fantastical eventkit events [flags]\n")
-	fmt.Fprint(w, "\nEXAMPLES:\n  fantastical eventkit calendars --json\n  fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar \"Work\"\n")
+	fmt.Fprint(w, "USAGE:\n  fantastical eventkit status [flags]\n  fantastical eventkit calendars [flags]\n  fantastical eventkit events [flags]\n")
+	fmt.Fprint(w, "\nEXAMPLES:\n  fantastical eventkit status --json\n  fantastical eventkit calendars --json\n  fantastical eventkit events --next-week --calendar \"Work\"\n")
 }
 
 func newEventKitCalendarsFlagSet(w io.Writer) (*flag.FlagSet, *eventKitCalendarsOptions) {
@@ -46,6 +64,7 @@ func newEventKitCalendarsFlagSet(w io.Writer) (*flag.FlagSet, *eventKitCalendars
 	fs := flag.NewFlagSet("eventkit calendars", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
+	fs.StringVar(&opts.format, "format", "", "Output format (plain|json|table)")
 	fs.BoolVar(&opts.json, "json", false, "Print machine-readable JSON output")
 	fs.BoolVar(&opts.plain, "plain", false, "Print stable plain-text output")
 	fs.BoolVar(&opts.noInput, "no-input", false, "Do not prompt for Calendar access")
@@ -65,21 +84,49 @@ func newEventKitEventsFlagSet(w io.Writer) (*flag.FlagSet, *eventKitEventsOption
 	fs := flag.NewFlagSet("eventkit events", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
+	fs.StringVar(&opts.format, "format", "", "Output format (plain|json|table)")
 	fs.BoolVar(&opts.json, "json", false, "Print machine-readable JSON output")
 	fs.BoolVar(&opts.plain, "plain", false, "Print stable plain-text output")
 	fs.BoolVar(&opts.noInput, "no-input", false, "Do not prompt for Calendar access")
 	fs.BoolVar(&opts.verbose, "verbose", false, "Verbose output to stderr")
 	fs.Var(&opts.calendars, "calendar", "Calendar name (repeatable)")
+	fs.Var(&opts.calendarIDs, "calendar-id", "Calendar identifier (repeatable)")
 	fs.StringVar(&opts.from, "from", "", "Start date/time (YYYY-MM-DD or YYYY-MM-DDTHH:MM)")
 	fs.StringVar(&opts.to, "to", "", "End date/time (YYYY-MM-DD or YYYY-MM-DDTHH:MM)")
+	fs.IntVar(&opts.days, "days", 0, "Days from now (shortcut for --from now --to now+days)")
+	fs.BoolVar(&opts.today, "today", false, "Use today's date range")
+	fs.BoolVar(&opts.tomorrow, "tomorrow", false, "Use tomorrow's date range")
+	fs.BoolVar(&opts.thisWeek, "this-week", false, "Use this week's date range")
+	fs.BoolVar(&opts.nextWeek, "next-week", false, "Use next week's date range")
 	fs.IntVar(&opts.limit, "limit", 0, "Limit number of events returned")
 	fs.BoolVar(&opts.includeAllDay, "include-all-day", true, "Include all-day events")
 	fs.BoolVar(&opts.includeDeclined, "include-declined", false, "Include declined events")
+	fs.StringVar(&opts.sort, "sort", "start", "Sort by start|end|title|calendar")
+	fs.StringVar(&opts.timezone, "tz", "", "Timezone for output (IANA name)")
+	fs.StringVar(&opts.query, "query", "", "Filter by title/location/notes (case-insensitive)")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical eventkit events [flags]\n")
 		fs.PrintDefaults()
-		fmt.Fprintln(w, "\nNOTE:\n  Requires Calendar access; macOS will prompt on first use.")
+		fmt.Fprintln(w, "\nNOTES:\n  Requires Calendar access; macOS will prompt on first use.\n  Date shortcuts (--today/--tomorrow/--this-week/--next-week/--days) are mutually exclusive with --from/--to.")
+	}
+
+	return fs, opts
+}
+
+func newEventKitStatusFlagSet(w io.Writer) (*flag.FlagSet, *eventKitStatusOptions) {
+	opts := &eventKitStatusOptions{}
+	fs := flag.NewFlagSet("eventkit status", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	fs.StringVar(&opts.format, "format", "", "Output format (plain|json)")
+	fs.BoolVar(&opts.json, "json", false, "Print machine-readable JSON output")
+	fs.BoolVar(&opts.plain, "plain", false, "Print stable plain-text output")
+	fs.BoolVar(&opts.verbose, "verbose", false, "Verbose output to stderr")
+
+	fs.Usage = func() {
+		fmt.Fprint(w, "USAGE:\n  fantastical eventkit status [flags]\n")
+		fs.PrintDefaults()
 	}
 
 	return fs, opts
@@ -93,6 +140,8 @@ func cmdEventKit(args []string, out, errOut io.Writer) error {
 
 	sub := strings.ToLower(strings.TrimSpace(args[0]))
 	switch sub {
+	case "status":
+		return cmdEventKitStatus(args[1:], out, errOut)
 	case "calendars":
 		return cmdEventKitCalendars(args[1:], out, errOut)
 	case "events":
@@ -101,6 +150,55 @@ func cmdEventKit(args []string, out, errOut io.Writer) error {
 		eventKitUsage(errOut)
 		return fmt.Errorf("%w: unknown eventkit subcommand %q", errUsage, sub)
 	}
+}
+
+func resolveEventKitFormat(format string, json, plain bool, allowed map[string]bool) (string, error) {
+	if format != "" {
+		if json || plain {
+			return "", fmt.Errorf("%w: cannot combine --format with --json/--plain", errUsage)
+		}
+		format = strings.ToLower(strings.TrimSpace(format))
+		if !allowed[format] {
+			return "", fmt.Errorf("%w: invalid --format %q", errUsage, format)
+		}
+		return format, nil
+	}
+	if json && plain {
+		return "", fmt.Errorf("%w: --json and --plain are mutually exclusive", errUsage)
+	}
+	if json {
+		return "json", nil
+	}
+	if plain {
+		return "plain", nil
+	}
+	if allowed["plain"] {
+		return "plain", nil
+	}
+	return "json", nil
+}
+
+func cmdEventKitStatus(args []string, out, errOut io.Writer) error {
+	fs, opts := newEventKitStatusFlagSet(errOut)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
+	format, err := resolveEventKitFormat(opts.format, opts.json, opts.plain, map[string]bool{
+		"plain": true,
+		"json":  true,
+	})
+	if err != nil {
+		return err
+	}
+
+	helperArgs := []string{"status", "--format", format}
+	return runEventKitHelper(helperArgs, out, errOut, opts.verbose)
 }
 
 func cmdEventKitCalendars(args []string, out, errOut io.Writer) error {
@@ -114,20 +212,17 @@ func cmdEventKitCalendars(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 
-	if opts.json && opts.plain {
-		return fmt.Errorf("%w: --json and --plain are mutually exclusive", errUsage)
-	}
-	if !opts.json && !opts.plain {
-		opts.plain = true
+	format, err := resolveEventKitFormat(opts.format, opts.json, opts.plain, map[string]bool{
+		"plain": true,
+		"json":  true,
+		"table": true,
+	})
+	if err != nil {
+		return err
 	}
 
 	helperArgs := []string{"calendars"}
-	if opts.json {
-		helperArgs = append(helperArgs, "--json")
-	}
-	if opts.plain {
-		helperArgs = append(helperArgs, "--plain")
-	}
+	helperArgs = append(helperArgs, "--format", format)
 	if opts.noInput {
 		helperArgs = append(helperArgs, "--no-input")
 	}
@@ -146,31 +241,46 @@ func cmdEventKitEvents(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 
-	if opts.json && opts.plain {
-		return fmt.Errorf("%w: --json and --plain are mutually exclusive", errUsage)
-	}
-	if !opts.json && !opts.plain {
-		opts.plain = true
+	format, err := resolveEventKitFormat(opts.format, opts.json, opts.plain, map[string]bool{
+		"plain": true,
+		"json":  true,
+		"table": true,
+	})
+	if err != nil {
+		return err
 	}
 
 	helperArgs := []string{"events"}
-	if opts.json {
-		helperArgs = append(helperArgs, "--json")
-	}
-	if opts.plain {
-		helperArgs = append(helperArgs, "--plain")
-	}
+	helperArgs = append(helperArgs, "--format", format)
 	if opts.noInput {
 		helperArgs = append(helperArgs, "--no-input")
 	}
 	for _, name := range opts.calendars {
 		helperArgs = append(helperArgs, "--calendar", name)
 	}
+	for _, id := range opts.calendarIDs {
+		helperArgs = append(helperArgs, "--calendar-id", id)
+	}
 	if strings.TrimSpace(opts.from) != "" {
 		helperArgs = append(helperArgs, "--from", strings.TrimSpace(opts.from))
 	}
 	if strings.TrimSpace(opts.to) != "" {
 		helperArgs = append(helperArgs, "--to", strings.TrimSpace(opts.to))
+	}
+	if opts.days > 0 {
+		helperArgs = append(helperArgs, "--days", fmt.Sprintf("%d", opts.days))
+	}
+	if opts.today {
+		helperArgs = append(helperArgs, "--today")
+	}
+	if opts.tomorrow {
+		helperArgs = append(helperArgs, "--tomorrow")
+	}
+	if opts.thisWeek {
+		helperArgs = append(helperArgs, "--this-week")
+	}
+	if opts.nextWeek {
+		helperArgs = append(helperArgs, "--next-week")
 	}
 	if opts.limit > 0 {
 		helperArgs = append(helperArgs, "--limit", fmt.Sprintf("%d", opts.limit))
@@ -180,6 +290,15 @@ func cmdEventKitEvents(args []string, out, errOut io.Writer) error {
 	}
 	if opts.includeDeclined {
 		helperArgs = append(helperArgs, "--include-declined")
+	}
+	if strings.TrimSpace(opts.sort) != "" {
+		helperArgs = append(helperArgs, "--sort", strings.TrimSpace(opts.sort))
+	}
+	if strings.TrimSpace(opts.timezone) != "" {
+		helperArgs = append(helperArgs, "--tz", strings.TrimSpace(opts.timezone))
+	}
+	if strings.TrimSpace(opts.query) != "" {
+		helperArgs = append(helperArgs, "--query", strings.TrimSpace(opts.query))
 	}
 
 	return runEventKitHelper(helperArgs, out, errOut, opts.verbose)
