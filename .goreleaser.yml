@@ -27,8 +27,8 @@ brews:
     description: "CLI for Fantastical URL handler and AppleScript"
     homepage: "https://github.com/vburojevic/fantastical-cli"
     license: "MIT"
-    folder: Formula
-    tap:
+    directory: Formula
+    repository:
       owner: vburojevic
       name: fantastical-cli
       branch: main
