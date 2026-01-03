@@ -100,8 +100,8 @@ fantastical completion install --path /usr/local/etc/bash_completion.d/fantastic
 
 ## Notes
 
-- On macOS, `--open` defaults to true (uses `open <url>`).
-- On other OSes, `--open` defaults to false, so you'll typically use `--print`.
+- macOS only (Fantastical is a macOS app).
+- `--open` defaults to true (uses `open <url>`).
 - `--dry-run` disables `--open` and `--copy` for safe previews.
 
 ## Docs

@@ -1,3 +1,6 @@
+//go:build darwin
+// +build darwin
+
 // fantastical.go
 //
 // A tiny CLI wrapper around Fantastical's documented integrations:
@@ -27,7 +30,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -107,8 +109,8 @@ COMMANDS
   version      Print version information
 
 NOTES
-  - On macOS, --open defaults to true (uses "open <url>").
-  - On other OSes, --open defaults to false, so you'll typically use --print.
+  - macOS only (Fantastical is a macOS app).
+  - --open defaults to true (uses "open <url>").
   - Use --json for machine-readable output; use --plain for stable text output.
 
 EXAMPLES
@@ -186,7 +188,7 @@ type parseOptions struct {
 
 func defaultOutputOptions(cfg *Config) outputOptions {
 	opts := outputOptions{
-		open: runtime.GOOS == "darwin",
+		open: true,
 	}
 	if cfg == nil {
 		return opts
@@ -507,7 +509,7 @@ type appleScriptOptions struct {
 
 func defaultAppleScriptOptions(cfg *Config) appleScriptOptions {
 	opts := appleScriptOptions{
-		run: runtime.GOOS == "darwin",
+		run: true,
 	}
 	if cfg == nil {
 		return opts
@@ -605,10 +607,6 @@ func cmdAppleScript(args []string, in io.Reader, out, errOut io.Writer) error {
 
 	if !opts.run {
 		return nil
-	}
-
-	if runtime.GOOS != "darwin" {
-		return errors.New("applescript --run is only supported on macOS (osascript); use --print to output the script")
 	}
 
 	logVerbose(errOut, opts.verbose, "running osascript (add=%t)", opts.add)
@@ -951,16 +949,7 @@ func openCommand(u string) (string, []string, error) {
 		return parts[0], append(parts[1:], u), nil
 	}
 
-	switch runtime.GOOS {
-	case "darwin":
-		return "open", []string{u}, nil
-	case "linux":
-		return "xdg-open", []string{u}, nil
-	case "windows":
-		return "rundll32", []string{"url.dll,FileProtocolHandler", u}, nil
-	default:
-		return "", nil, fmt.Errorf("don't know how to open URLs on %s (use --print)", runtime.GOOS)
-	}
+	return "open", []string{u}, nil
 }
 
 func osascriptCommand() string {
@@ -974,48 +963,14 @@ func osascriptCommand() string {
 }
 
 func copyToClipboard(text string) error {
-	switch runtime.GOOS {
-	case "darwin":
-		path, err := exec.LookPath("pbcopy")
-		if err != nil {
-			return errors.New("pbcopy not found (install Xcode command line tools or use --print)")
-		}
-		cmd := exec.Command(path)
-		cmd.Stdin = strings.NewReader(text)
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-
-	case "windows":
-		cmd := exec.Command("cmd", "/c", "clip")
-		cmd.Stdin = strings.NewReader(text)
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-
-	case "linux":
-		// Try Wayland first, then X11.
-		if p, _ := exec.LookPath("wl-copy"); p != "" {
-			cmd := exec.Command("wl-copy")
-			cmd.Stdin = strings.NewReader(text)
-			cmd.Stderr = os.Stderr
-			return cmd.Run()
-		}
-		if p, _ := exec.LookPath("xclip"); p != "" {
-			cmd := exec.Command("xclip", "-selection", "clipboard")
-			cmd.Stdin = strings.NewReader(text)
-			cmd.Stderr = os.Stderr
-			return cmd.Run()
-		}
-		if p, _ := exec.LookPath("xsel"); p != "" {
-			cmd := exec.Command("xsel", "--clipboard", "--input")
-			cmd.Stdin = strings.NewReader(text)
-			cmd.Stderr = os.Stderr
-			return cmd.Run()
-		}
-		return errors.New("clipboard tool not found (need wl-copy, xclip, or xsel)")
-
-	default:
-		return fmt.Errorf("clipboard copy not supported on %s", runtime.GOOS)
+	path, err := exec.LookPath("pbcopy")
+	if err != nil {
+		return errors.New("pbcopy not found (install Xcode command line tools or use --print)")
 	}
+	cmd := exec.Command(path)
+	cmd.Stdin = strings.NewReader(text)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func parseDateArg(s string) (time.Time, error) {
@@ -1112,13 +1067,10 @@ func defaultCompletionPath(shell string) (string, error) {
 
 	switch shell {
 	case "bash":
-		if runtime.GOOS == "darwin" {
-			if _, err := os.Stat("/opt/homebrew"); err == nil {
-				return "/opt/homebrew/etc/bash_completion.d/fantastical", nil
-			}
-			return "/usr/local/etc/bash_completion.d/fantastical", nil
+		if _, err := os.Stat("/opt/homebrew"); err == nil {
+			return "/opt/homebrew/etc/bash_completion.d/fantastical", nil
 		}
-		return home + "/.local/share/bash-completion/completions/fantastical", nil
+		return "/usr/local/etc/bash_completion.d/fantastical", nil
 	case "zsh":
 		return home + "/.zsh/completions/_fantastical", nil
 	case "fish":

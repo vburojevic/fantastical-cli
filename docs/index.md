@@ -2,6 +2,8 @@
 
 A tiny CLI wrapper around Fantastical's URL handler and AppleScript integration.
 
+macOS only (Fantastical is a macOS app).
+
 ## Commands
 
 - `parse` — Build `x-fantastical3://parse?...` URLs
