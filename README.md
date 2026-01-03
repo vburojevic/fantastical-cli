@@ -32,14 +32,15 @@ fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
 fantastical parse --print "Dinner with Sam tomorrow 7pm"
 fantastical parse --stdin --json < input.txt
 fantastical parse --param duration=60 --timezone "America/Los_Angeles" "Focus block"
-fantastical show mini today
 fantastical show --view month 2026-01-03
 fantastical show --calendar-set "My Calendar Set"
-fantastical show set "My Calendar Set"
 fantastical applescript --add "Wake up at 8am"
-fantastical validate parse --json "Dinner at 7"
+fantastical validate --json parse "Dinner at 7"
 fantastical doctor
 fantastical greta --format json
+fantastical help --json parse
+fantastical explain parse
+fantastical man --format json
 ```
 
 ## Output modes
@@ -105,6 +106,16 @@ fantastical completion uninstall fish
 # Install to a specific path
 fantastical completion install --path /usr/local/etc/bash_completion.d/fantastical bash
 ```
+
+## Agent discovery
+
+- `fantastical greta --format json` — full CLI spec
+- `fantastical greta --examples` — curated examples
+- `fantastical greta --capabilities` — supported views/features
+- `fantastical help --json [command]` — command-level JSON help
+- `fantastical man --format json` — manual in JSON
+
+See `docs/agent.md` for more details.
 
 ## Notes
 

@@ -269,6 +269,18 @@ func TestCmdValidateParse(t *testing.T) {
 	}
 }
 
+func TestCmdValidateJSON(t *testing.T) {
+	setupTestEnv(t)
+
+	var out, errOut bytes.Buffer
+	if err := cmdValidate([]string{"--json", "parse", "Wake"}, strings.NewReader(""), &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"ok\":true") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
 func TestCmdDoctorJSON(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if err := cmdDoctor([]string{"--json", "--skip-app"}, &out, &errOut); err != nil {
@@ -285,6 +297,26 @@ func TestCmdGretaJSON(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(out.String(), "\"commands\"") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestCmdGretaExamples(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := cmdGreta([]string{"--examples"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"examples\"") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestCmdGretaCapabilities(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := cmdGreta([]string{"--capabilities"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"views\"") {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 }
@@ -345,6 +377,36 @@ func TestPrintSubcommandHelpUnknown(t *testing.T) {
 		t.Fatalf("expected error")
 	} else if !errors.Is(err, errUsage) {
 		t.Fatalf("expected usage error, got: %v", err)
+	}
+}
+
+func TestCmdHelpJSON(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := cmdHelp([]string{"--json", "parse"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"command\"") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestCmdExplain(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := cmdExplain([]string{"parse"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "parse builds") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestCmdManJSON(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := cmdMan([]string{"--format", "json"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"synopsis\"") {
+		t.Fatalf("unexpected output: %q", out.String())
 	}
 }
 

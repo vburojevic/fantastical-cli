@@ -21,6 +21,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -73,14 +74,14 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		err = cmdDoctor(args[2:], out, errOut)
 	case "greta":
 		err = cmdGreta(args[2:], out, errOut)
+	case "explain":
+		err = cmdExplain(args[2:], out, errOut)
+	case "man":
+		err = cmdMan(args[2:], out, errOut)
 	case "completion":
 		err = cmdCompletion(args[2:], out, errOut)
 	case "help", "-h", "--help":
-		if len(args) > 2 {
-			err = printSubcommandHelp(args[2], out)
-		} else {
-			usage(out)
-		}
+		err = cmdHelp(args[2:], out, errOut)
 	case "version", "--version":
 		printVersion(out)
 	default:
@@ -113,6 +114,8 @@ COMMANDS
   validate     Validate parse/show input and print the URL
   doctor       Check Fantastical + macOS integration status
   greta        Machine-readable CLI spec for agents
+  explain      Human-readable command walkthrough
+  man          Manual page output (markdown or json)
   completion   Print or install shell completion (bash|zsh|fish)
   help         Show help for a command
   version      Print version information
@@ -131,6 +134,9 @@ EXAMPLES
   fantastical show set "My Calendar Set"
   fantastical applescript --add "Wake up at 8am"
   fantastical greta --format json
+  fantastical help --json parse
+  fantastical explain parse
+  fantastical man --format markdown
 `)
 }
 
@@ -161,9 +167,83 @@ func printSubcommandHelp(cmd string, w io.Writer) error {
 	case "greta":
 		gretaUsage(w)
 		return nil
+	case "explain":
+		explainUsage(w)
+		return nil
+	case "man":
+		manUsage(w)
+		return nil
 	default:
 		return fmt.Errorf("%w: unknown help topic %q", errUsage, cmd)
 	}
+}
+
+type helpOptions struct {
+	json bool
+}
+
+func cmdHelp(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("help", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	opts := helpOptions{}
+	fs.BoolVar(&opts.json, "json", false, "Print machine-readable JSON help")
+
+	fs.Usage = func() {
+		fmt.Fprint(errOut, "USAGE:\n  fantastical help [--json] [command]\n")
+		fmt.Fprintln(errOut, "\nEXAMPLE:\n  fantastical help --json parse")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
+	cmd := ""
+	if fs.NArg() > 0 {
+		cmd = fs.Arg(0)
+	}
+
+	if opts.json {
+		spec, err := helpSpec(cmd)
+		if err != nil {
+			return err
+		}
+		return writeJSON(out, spec)
+	}
+
+	if cmd == "" {
+		usage(out)
+		return nil
+	}
+
+	return printSubcommandHelp(cmd, out)
+}
+
+func helpSpec(command string) (any, error) {
+	spec := gretaSpec("v1")
+	if strings.TrimSpace(command) == "" {
+		return spec, nil
+	}
+
+	cmd := strings.ToLower(strings.TrimSpace(command))
+	commands, ok := spec["commands"].([]map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid greta spec")
+	}
+	for _, entry := range commands {
+		if name, _ := entry["name"].(string); strings.EqualFold(name, cmd) {
+			return map[string]any{
+				"schemaVersion": spec["schemaVersion"],
+				"command":       entry,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: unknown help topic %q", errUsage, command)
 }
 
 func versionString() string {
@@ -682,25 +762,72 @@ func cmdAppleScript(args []string, in io.Reader, out, errOut io.Writer) error {
 }
 
 func validateUsage(w io.Writer) {
-	fmt.Fprint(w, "USAGE:\n  fantastical validate parse [flags] <sentence...>\n  fantastical validate show [flags] <view> [date]\n")
-	fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical validate parse --json \"Dinner at 7\"\n  fantastical validate show month 2026-01-03")
+	fmt.Fprint(w, "USAGE:\n  fantastical validate [--json] parse [flags] <sentence...>\n  fantastical validate [--json] show [flags] <view> [date]\n")
+	fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical validate --json parse \"Dinner at 7\"\n  fantastical validate show month 2026-01-03")
 }
 
 func cmdValidate(args []string, in io.Reader, out, errOut io.Writer) error {
-	if len(args) < 1 {
+	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	jsonOut := false
+	fs.BoolVar(&jsonOut, "json", false, "Print machine-readable JSON validation result")
+
+	fs.Usage = func() {
+		validateUsage(errOut)
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
+	if fs.NArg() < 1 {
 		validateUsage(errOut)
 		return fmt.Errorf("%w: missing validate target (parse|show)", errUsage)
 	}
 
-	sub := strings.ToLower(args[0])
-	rest := args[1:]
+	sub := strings.ToLower(fs.Arg(0))
+	rest := fs.Args()[1:]
 	rest = append([]string{"--dry-run", "--print"}, rest...)
+
+	runValidate := func(fn func([]string, io.Reader, io.Writer, io.Writer) error) error {
+		if !jsonOut {
+			return fn(rest, in, out, errOut)
+		}
+
+		var buf bytes.Buffer
+		err := fn(rest, in, &buf, errOut)
+		if err != nil {
+			payload := map[string]any{
+				"ok":     false,
+				"target": sub,
+				"error":  err.Error(),
+			}
+			return writeJSON(out, payload)
+		}
+
+		payload := map[string]any{
+			"ok":     true,
+			"target": sub,
+			"output": strings.TrimSpace(buf.String()),
+		}
+		return writeJSON(out, payload)
+	}
 
 	switch sub {
 	case "parse":
-		return cmdParse(rest, in, out, errOut)
+		return runValidate(func(args []string, in io.Reader, out io.Writer, errOut io.Writer) error {
+			return cmdParse(args, in, out, errOut)
+		})
 	case "show":
-		return cmdShow(rest, out, errOut)
+		return runValidate(func(args []string, in io.Reader, out io.Writer, errOut io.Writer) error {
+			return cmdShow(args, out, errOut)
+		})
 	default:
 		validateUsage(errOut)
 		return fmt.Errorf("%w: unknown validate target %q (want: parse, show)", errUsage, sub)
@@ -761,6 +888,7 @@ func cmdDoctor(args []string, out, errOut io.Writer) error {
 				"ok":    appErr == nil,
 				"check": !opts.skipApp,
 			},
+			"permissions": "Grant Terminal Automation permission if AppleScript prompts or fails.",
 		}
 		if err := writeJSON(out, payload); err != nil {
 			return err
@@ -801,20 +929,26 @@ func cmdDoctor(args []string, out, errOut io.Writer) error {
 }
 
 type gretaOptions struct {
-	format string
+	format       string
+	schema       string
+	examples     bool
+	capabilities bool
 }
 
 func gretaUsage(w io.Writer) {
-	fmt.Fprint(w, "USAGE:\n  fantastical greta [--format json|markdown]\n")
-	fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical greta --format json")
+	fmt.Fprint(w, "USAGE:\n  fantastical greta [--format json|markdown] [--schema v1] [--examples] [--capabilities]\n")
+	fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical greta --format json\n  fantastical greta --examples\n  fantastical greta --capabilities --format json")
 }
 
 func cmdGreta(args []string, out, errOut io.Writer) error {
 	fs := flag.NewFlagSet("greta", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	opts := gretaOptions{format: "json"}
+	opts := gretaOptions{format: "json", schema: "v1"}
 	fs.StringVar(&opts.format, "format", opts.format, "Output format: json or markdown")
+	fs.StringVar(&opts.schema, "schema", opts.schema, "Schema version (v1)")
+	fs.BoolVar(&opts.examples, "examples", false, "Output curated examples only")
+	fs.BoolVar(&opts.capabilities, "capabilities", false, "Output capability summary only")
 
 	fs.Usage = func() {
 		gretaUsage(errOut)
@@ -829,9 +963,38 @@ func cmdGreta(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 
-	switch strings.ToLower(strings.TrimSpace(opts.format)) {
+	format := strings.ToLower(strings.TrimSpace(opts.format))
+	if strings.TrimSpace(opts.schema) == "" {
+		opts.schema = "v1"
+	}
+	if opts.schema != "v1" {
+		fs.Usage()
+		return fmt.Errorf("%w: unknown schema %q (want: v1)", errUsage, opts.schema)
+	}
+
+	if opts.examples && opts.capabilities {
+		fs.Usage()
+		return fmt.Errorf("%w: --examples and --capabilities are mutually exclusive", errUsage)
+	}
+
+	if opts.examples {
+		if format == "markdown" {
+			fmt.Fprintln(out, gretaExamplesMarkdown())
+			return nil
+		}
+		return writeJSON(out, gretaExamples(opts.schema))
+	}
+	if opts.capabilities {
+		if format == "markdown" {
+			fmt.Fprintln(out, gretaCapabilitiesMarkdown())
+			return nil
+		}
+		return writeJSON(out, gretaCapabilities(opts.schema))
+	}
+
+	switch format {
 	case "json":
-		return writeJSON(out, gretaSpec())
+		return writeJSON(out, gretaSpec(opts.schema))
 	case "markdown":
 		fmt.Fprintln(out, gretaMarkdown())
 		return nil
@@ -841,11 +1004,12 @@ func cmdGreta(args []string, out, errOut io.Writer) error {
 	}
 }
 
-func gretaSpec() map[string]any {
+func gretaSpec(schema string) map[string]any {
 	return map[string]any{
-		"name":        appName,
-		"description": "CLI for Fantastical URL handler and AppleScript integration (macOS only)",
-		"usage":       "fantastical [--version] <command> [flags] [args]",
+		"schemaVersion": schema,
+		"name":          appName,
+		"description":   "CLI for Fantastical URL handler and AppleScript integration (macOS only)",
+		"usage":         "fantastical [--version] <command> [flags] [args]",
 		"commands": []map[string]any{
 			{
 				"name":        "parse",
@@ -912,6 +1076,7 @@ func gretaSpec() map[string]any {
 				"flags": []string{
 					"--json",
 					"--skip-app",
+					"--verbose",
 				},
 			},
 			{
@@ -919,6 +1084,28 @@ func gretaSpec() map[string]any {
 				"description": "Machine-readable CLI spec for agents",
 				"flags": []string{
 					"--format json|markdown",
+					"--schema v1",
+					"--examples",
+					"--capabilities",
+				},
+			},
+			{
+				"name":        "explain",
+				"description": "Human-readable command walkthrough",
+				"args":        "<command>",
+			},
+			{
+				"name":        "man",
+				"description": "Manual page output (markdown or json)",
+				"flags": []string{
+					"--format markdown|json",
+				},
+			},
+			{
+				"name":        "help",
+				"description": "Show help for a command",
+				"flags": []string{
+					"--json",
 				},
 			},
 			{
@@ -974,6 +1161,8 @@ func gretaMarkdown() string {
 - validate: validate parse/show input and print URL
 - doctor: check Fantastical + macOS integration status
 - greta: machine-readable CLI spec for agents
+- explain: human-readable command walkthrough
+- man: manual page output
 - completion: print/install/uninstall shell completions
 
 ## Config
@@ -981,6 +1170,272 @@ func gretaMarkdown() string {
 - Project: .fantastical.json
 - Env override: FANTASTICAL_CONFIG
 - Precedence: flags > env > project config > user config
+`
+}
+
+func gretaExamples(schema string) map[string]any {
+	return map[string]any{
+		"schemaVersion": schema,
+		"examples": []map[string]any{
+			{
+				"description": "Create an event with a calendar and note",
+				"command":     `fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"`,
+			},
+			{
+				"description": "Build a URL without opening (JSON output)",
+				"command":     `fantastical parse --json "Dinner tomorrow 7pm"`,
+			},
+			{
+				"description": "Show month view on a specific date",
+				"command":     `fantastical show --view month 2026-01-03`,
+			},
+			{
+				"description": "Show a calendar set",
+				"command":     `fantastical show --calendar-set "My Calendar Set"`,
+			},
+			{
+				"description": "Validate a parse command",
+				"command":     `fantastical validate --json parse "Dinner at 7"`,
+			},
+			{
+				"description": "Check installation and permissions",
+				"command":     `fantastical doctor --json`,
+			},
+		},
+	}
+}
+
+func gretaExamplesMarkdown() string {
+	return `# fantastical examples
+
+- Create an event with a calendar and note:
+  fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
+- Build a URL without opening (JSON output):
+  fantastical parse --json "Dinner tomorrow 7pm"
+- Show month view on a specific date:
+  fantastical show --view month 2026-01-03
+- Show a calendar set:
+  fantastical show --calendar-set "My Calendar Set"
+- Validate a parse command:
+  fantastical validate --json parse "Dinner at 7"
+- Check installation and permissions:
+  fantastical doctor --json
+`
+}
+
+func gretaCapabilities(schema string) map[string]any {
+	return map[string]any{
+		"schemaVersion": schema,
+		"platform":      "macOS",
+		"views": []string{
+			"mini", "calendar", "day", "week", "month", "agenda", "set",
+		},
+		"outputModes": []string{
+			"plain", "json",
+		},
+		"features": []string{
+			"stdin",
+			"config",
+			"completion",
+			"validate",
+			"doctor",
+			"greta",
+			"explain",
+			"man",
+		},
+	}
+}
+
+func gretaCapabilitiesMarkdown() string {
+	return `# fantastical capabilities
+
+- Platform: macOS
+- Views: mini, calendar, day, week, month, agenda, set
+- Output modes: plain, json
+- Features: stdin, config, completion, validate, doctor, greta, explain, man
+`
+}
+
+type explainOptions struct {
+	command string
+}
+
+func explainUsage(w io.Writer) {
+	fmt.Fprint(w, "USAGE:\n  fantastical explain <command>\n")
+	fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical explain parse")
+}
+
+func cmdExplain(args []string, out, errOut io.Writer) error {
+	if len(args) < 1 {
+		explainUsage(errOut)
+		return fmt.Errorf("%w: missing command", errUsage)
+	}
+
+	text, err := explainText(args[0])
+	if err != nil {
+		explainUsage(errOut)
+		return err
+	}
+
+	fmt.Fprintln(out, text)
+	return nil
+}
+
+func explainText(command string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "parse":
+		return `parse builds an x-fantastical3://parse URL from a natural language sentence.
+
+Common usage:
+  fantastical parse "Meet Sam tomorrow 3pm" --add --calendar "Work"
+
+Flags:
+  --note, --calendar, --add control Fantastical's parse behavior.
+  --param key=value lets you pass extra Fantastical query params.
+  --timezone sets tz=... for the URL.
+  --json outputs machine-readable JSON with the URL.
+  --dry-run disables open/copy side effects.`, nil
+	case "show":
+		return `show builds x-fantastical3://show URLs for views or calendar sets.
+
+Examples:
+  fantastical show mini today
+  fantastical show --view month 2026-01-03
+  fantastical show --calendar-set "My Calendar Set"
+
+Use --timezone to set tz=... and --param to pass extra query params.`, nil
+	case "applescript":
+		return `applescript sends a sentence to Fantastical via osascript.
+
+Example:
+  fantastical applescript --add "Wake up at 8am"
+
+Use --print to see the script and --dry-run to avoid execution.`, nil
+	case "validate":
+		return `validate checks parse/show input and prints the resulting URL.
+
+Example:
+  fantastical validate --json parse "Dinner at 7"
+
+Useful for scripting and CI checks.`, nil
+	case "doctor":
+		return `doctor checks Fantastical app availability and macOS tooling.
+
+Example:
+  fantastical doctor --json
+
+If AppleScript fails, grant Terminal Automation permission.`, nil
+	case "greta":
+		return `greta outputs a full CLI spec for AI agents.
+
+Examples:
+  fantastical greta --format json
+  fantastical greta --examples
+  fantastical greta --capabilities`, nil
+	case "explain":
+		return "explain prints a human-readable walkthrough for a command.", nil
+	case "man":
+		return "man outputs the full manual in markdown or JSON.", nil
+	case "completion":
+		return `completion prints or installs shell completion scripts.
+
+Examples:
+  fantastical completion zsh
+  fantastical completion install zsh
+  fantastical completion uninstall zsh`, nil
+	case "help":
+		return "help shows command usage. Use --json for machine-readable help.", nil
+	case "version":
+		return "version prints the CLI version.", nil
+	default:
+		return "", fmt.Errorf("%w: unknown command %q", errUsage, command)
+	}
+}
+
+type manOptions struct {
+	format string
+}
+
+func manUsage(w io.Writer) {
+	fmt.Fprint(w, "USAGE:\n  fantastical man [--format markdown|json]\n")
+	fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical man --format json")
+}
+
+func cmdMan(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("man", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	opts := manOptions{format: "markdown"}
+	fs.StringVar(&opts.format, "format", opts.format, "Output format: markdown or json")
+
+	fs.Usage = func() {
+		manUsage(errOut)
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
+	format := strings.ToLower(strings.TrimSpace(opts.format))
+	switch format {
+	case "markdown":
+		fmt.Fprintln(out, manMarkdown())
+		return nil
+	case "json":
+		return writeJSON(out, manSpec())
+	default:
+		fs.Usage()
+		return fmt.Errorf("%w: unknown format %q (want: markdown, json)", errUsage, opts.format)
+	}
+}
+
+func manSpec() map[string]any {
+	return map[string]any{
+		"name":        appName,
+		"synopsis":    "fantastical [--version] <command> [flags] [args]",
+		"description": "CLI for Fantastical URL handler and AppleScript integration (macOS only).",
+		"commands":    gretaSpec("v1")["commands"],
+		"config": map[string]any{
+			"user":    "~/.config/fantastical/config.json",
+			"project": ".fantastical.json",
+			"env":     "FANTASTICAL_CONFIG overrides user config path",
+			"order":   "flags > env > project config > user config",
+		},
+		"exit_codes": map[string]int{
+			"success": 0,
+			"usage":   2,
+			"error":   1,
+		},
+	}
+}
+
+func manMarkdown() string {
+	return `# fantastical
+
+## NAME
+fantastical — CLI for Fantastical URL handler and AppleScript integration (macOS only)
+
+## SYNOPSIS
+fantastical [--version] <command> [flags] [args]
+
+## DESCRIPTION
+Use Fantastical's URL handler and AppleScript integration from the command line.
+
+## COMMANDS
+See fantastical help or fantastical greta --format json.
+
+## CONFIG
+User: ~/.config/fantastical/config.json
+Project: .fantastical.json
+Precedence: flags > env > project config > user config
+
+## EXIT CODES
+0 success, 1 error, 2 usage
 `
 }
 
@@ -1178,7 +1633,7 @@ func bashCompletion() string {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local cmds="parse show applescript validate doctor greta as completion help version"
+  local cmds="parse show applescript validate doctor greta explain man as completion help version"
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
     return 0
@@ -1203,14 +1658,26 @@ func bashCompletion() string {
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     validate)
+      local flags="--json --help"
       local subs="parse show"
-      COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
+      if [[ $COMP_CWORD -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
+        return 0
+      fi
+      COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     doctor)
       local flags="--json --skip-app --verbose --help"
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     greta)
+      local flags="--format --schema --examples --capabilities --help"
+      COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+      ;;
+    explain)
+      COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+      ;;
+    man)
       local flags="--format --help"
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
@@ -1219,7 +1686,12 @@ func bashCompletion() string {
       COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
       ;;
     help)
-      COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+      local flags="--json --help"
+      if [[ $COMP_CWORD -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+        return 0
+      fi
+      COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
   esac
 }
@@ -1239,6 +1711,8 @@ _fantastical() {
     'validate:Validate input and print URL'
     'doctor:Check Fantastical integration'
     'greta:CLI spec for agents'
+    'explain:Human-readable command walkthrough'
+    'man:Manual page output'
     'completion:Generate shell completion'
     'help:Show help for a command'
     'version:Print version information'
@@ -1299,7 +1773,9 @@ _fantastical() {
             '--config[Config file path]'
           ;;
         validate)
-          _arguments '1:target:(parse show)' '*:args:'
+          _arguments \
+            '--json[JSON output]' \
+            '1:target:(parse show)' '*:args:'
           ;;
         doctor)
           _arguments \
@@ -1308,13 +1784,23 @@ _fantastical() {
             '--verbose[Verbose output]'
           ;;
         greta)
-          _arguments '--format[Output format (json|markdown)]'
+          _arguments \
+            '--format[Output format (json|markdown)]' \
+            '--schema[Schema version (v1)]' \
+            '--examples[Examples only]' \
+            '--capabilities[Capabilities only]'
+          ;;
+        explain)
+          _arguments '1:command:(parse show applescript validate doctor greta completion help version)'
+          ;;
+        man)
+          _arguments '--format[Output format (markdown|json)]'
           ;;
         completion)
           _arguments '1:sub:(install uninstall bash zsh fish)'
           ;;
         help)
-          _arguments '1:command:(parse show applescript validate doctor greta completion help version)'
+          _arguments '--json[JSON output]' '1:command:(parse show applescript validate doctor greta explain man completion help version)'
           ;;
       esac
       ;;
@@ -1326,7 +1812,7 @@ _fantastical "$@"`
 
 func fishCompletion() string {
 	return `complete -c fantastical -f
-complete -c fantastical -n '__fish_use_subcommand' -a 'parse show applescript validate doctor greta completion help version' -d 'fantastical command'
+complete -c fantastical -n '__fish_use_subcommand' -a 'parse show applescript validate doctor greta explain man completion help version' -d 'fantastical command'
 
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l note -d 'Optional note'
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -s n -d 'Optional note'
@@ -1367,12 +1853,20 @@ complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l verbose 
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l stdin -d 'Read from stdin'
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l config -d 'Config file path'
 
+complete -c fantastical -n '__fish_seen_subcommand_from validate' -l json -d 'JSON output'
 complete -c fantastical -n '__fish_seen_subcommand_from validate' -a 'parse show' -d 'Validate target'
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l json -d 'JSON output'
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l skip-app -d 'Skip app check'
+complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l verbose -d 'Verbose output'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l format -d 'Format'
+complete -c fantastical -n '__fish_seen_subcommand_from greta' -l schema -d 'Schema'
+complete -c fantastical -n '__fish_seen_subcommand_from greta' -l examples -d 'Examples only'
+complete -c fantastical -n '__fish_seen_subcommand_from greta' -l capabilities -d 'Capabilities only'
+complete -c fantastical -n '__fish_seen_subcommand_from explain' -a 'parse show applescript validate doctor greta completion help version' -d 'Command'
+complete -c fantastical -n '__fish_seen_subcommand_from man' -l format -d 'Format'
 complete -c fantastical -n '__fish_seen_subcommand_from completion' -a 'install uninstall bash zsh fish' -d 'Shell'
-complete -c fantastical -n '__fish_seen_subcommand_from help' -a 'parse show applescript validate doctor greta completion help version' -d 'Command'`
+complete -c fantastical -n '__fish_seen_subcommand_from help' -l json -d 'JSON output'
+complete -c fantastical -n '__fish_seen_subcommand_from help' -a 'parse show applescript validate doctor greta explain man completion help version' -d 'Command'`
 }
 
 func buildParseURL(sentence, note, calendar string, add bool, extra url.Values) string {

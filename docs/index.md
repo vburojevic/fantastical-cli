@@ -12,7 +12,10 @@ macOS only (Fantastical is a macOS app).
 - `validate` — Validate parse/show input and print the URL
 - `doctor` — Check Fantastical integration status
 - `greta` — Machine-readable CLI spec for agents
+- `explain` — Human-readable command walkthrough
+- `man` — Manual page output (markdown or json)
 - `completion` — Print/install/uninstall shell completions
+- `help` — Show help for a command (use `--json` for machine output)
 
 ## Output modes
 
@@ -54,4 +57,10 @@ fantastical show --calendar-set "Work"
 fantastical validate show month 2026-01-03
 fantastical doctor --json
 fantastical greta --format json
+fantastical help --json parse
+fantastical man --format json
 ```
+
+## Agent docs
+
+See `docs/agent.md` for agent-friendly discovery guidance.
