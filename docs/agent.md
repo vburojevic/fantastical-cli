@@ -16,6 +16,10 @@ This CLI is designed to be discoverable and safe for AI agents (Codex, Claude Co
   - Full manual in JSON for tooling.
 - `fantastical explain <command>`
   - Human-readable walkthroughs.
+- `fantastical eventkit calendars --json`
+  - List system calendars (requires Calendar permission).
+- `fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"`
+  - List events for a date range (requires Calendar permission).
 
 ## Safe validation
 
@@ -37,6 +41,8 @@ Use `--json` with `parse`, `show`, `validate`, and `doctor` for machine-readable
 - macOS only (Fantastical is a macOS app).
 - `--dry-run` disables opening/copying URLs.
 - For `parse`/`applescript`, put flags before the sentence or use `--` to separate.
+- `eventkit` commands use EventKit and will prompt for Calendar access on first use.
+- The EventKit helper is compiled with `swiftc` on first use (requires Xcode Command Line Tools).
 
 Example:
 

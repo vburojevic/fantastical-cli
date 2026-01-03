@@ -72,6 +72,8 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		err = cmdValidate(args[2:], in, out, errOut)
 	case "doctor":
 		err = cmdDoctor(args[2:], out, errOut)
+	case "eventkit":
+		err = cmdEventKit(args[2:], out, errOut)
 	case "greta":
 		err = cmdGreta(args[2:], out, errOut)
 	case "explain":
@@ -113,6 +115,7 @@ COMMANDS
   applescript  Send "parse sentence" to Fantastical via osascript (macOS)
   validate     Validate parse/show input and print the URL
   doctor       Check Fantastical + macOS integration status
+  eventkit     List calendars or events via EventKit (system Calendar access)
   greta        Machine-readable CLI spec for agents
   explain      Human-readable command walkthrough
   man          Manual page output (markdown or json)
@@ -125,6 +128,7 @@ NOTES
   - --open defaults to true (uses "open <url>").
   - Use --json for machine-readable output; use --plain for stable text output.
   - For parse/applescript, put flags before the sentence or use -- to separate.
+  - eventkit commands require Calendar access; macOS will prompt on first use.
 
 EXAMPLES
   fantastical parse --add --calendar "Work" --note "Alarm" "Wake up at 8am"
@@ -134,6 +138,8 @@ EXAMPLES
   fantastical show month 2026-01-03
   fantastical show set "My Calendar Set"
   fantastical applescript --add "Wake up at 8am"
+  fantastical eventkit calendars --json
+  fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
   fantastical greta --format json
   fantastical help --json parse
   fantastical explain parse
@@ -164,6 +170,9 @@ func printSubcommandHelp(cmd string, w io.Writer) error {
 		return nil
 	case "doctor":
 		doctorUsage(w)
+		return nil
+	case "eventkit":
+		eventKitUsage(w)
 		return nil
 	case "greta":
 		gretaUsage(w)
@@ -1015,6 +1024,7 @@ func gretaSpec(schema string) map[string]any {
 		"usage":         "fantastical [--version] <command> [flags] [args]",
 		"notes": []string{
 			"For parse/applescript, put flags before the sentence or use -- to separate.",
+			"EventKit commands require Calendar access and compile a helper with swiftc on first use.",
 		},
 		"commands": []map[string]any{
 			{
@@ -1086,6 +1096,22 @@ func gretaSpec(schema string) map[string]any {
 				},
 			},
 			{
+				"name":        "eventkit",
+				"description": "List calendars or events via EventKit",
+				"args":        "calendars|events [flags]",
+				"flags": []string{
+					"--json",
+					"--plain",
+					"--no-input",
+					"--calendar",
+					"--from",
+					"--to",
+					"--limit",
+					"--include-all-day",
+					"--include-declined",
+				},
+			},
+			{
 				"name":        "greta",
 				"description": "Machine-readable CLI spec for agents",
 				"flags": []string{
@@ -1144,6 +1170,7 @@ func gretaSpec(schema string) map[string]any {
 			"FANTASTICAL_APPLESCRIPT_ADD",
 			"FANTASTICAL_APPLESCRIPT_RUN",
 			"FANTASTICAL_APPLESCRIPT_PRINT",
+			"FANTASTICAL_EVENTKIT_HELPER",
 		},
 		"exit_codes": map[string]int{
 			"success": 0,
@@ -1160,6 +1187,8 @@ func gretaMarkdown() string {
 - Usage: fantastical [--version] <command> [flags] [args]
 - macOS only
 - Note: for parse/applescript, put flags before the sentence or use -- to separate.
+- Note: eventkit commands request Calendar access on first use.
+- Note: eventkit builds a small Swift helper (swiftc) on first use.
 
 ## Commands
 - parse: build x-fantastical3://parse URL
@@ -1167,6 +1196,7 @@ func gretaMarkdown() string {
 - applescript: run Fantastical AppleScript parse sentence
 - validate: validate parse/show input and print URL
 - doctor: check Fantastical + macOS integration status
+- eventkit: list calendars or events via EventKit
 - greta: machine-readable CLI spec for agents
 - explain: human-readable command walkthrough
 - man: manual page output
@@ -1208,6 +1238,14 @@ func gretaExamples(schema string) map[string]any {
 				"description": "Check installation and permissions",
 				"command":     `fantastical doctor --json`,
 			},
+			{
+				"description": "List calendars via EventKit",
+				"command":     `fantastical eventkit calendars --json`,
+			},
+			{
+				"description": "List events for a date range via EventKit",
+				"command":     `fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"`,
+			},
 		},
 	}
 }
@@ -1227,6 +1265,10 @@ func gretaExamplesMarkdown() string {
   fantastical validate --json parse "Dinner at 7"
 - Check installation and permissions:
   fantastical doctor --json
+- List calendars via EventKit:
+  fantastical eventkit calendars --json
+- List events for a date range via EventKit:
+  fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
 `
 }
 
@@ -1246,6 +1288,7 @@ func gretaCapabilities(schema string) map[string]any {
 			"completion",
 			"validate",
 			"doctor",
+			"eventkit",
 			"greta",
 			"explain",
 			"man",
@@ -1259,7 +1302,7 @@ func gretaCapabilitiesMarkdown() string {
 - Platform: macOS
 - Views: mini, calendar, day, week, month, agenda, set
 - Output modes: plain, json
-- Features: stdin, config, completion, validate, doctor, greta, explain, man
+- Features: stdin, config, completion, validate, doctor, eventkit, greta, explain, man
 `
 }
 
@@ -1329,6 +1372,15 @@ Example:
   fantastical doctor --json
 
 If AppleScript fails, grant Terminal Automation permission.`, nil
+	case "eventkit":
+		return `eventkit lists calendars or events via EventKit (system Calendar access).
+
+Examples:
+  fantastical eventkit calendars --json
+  fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
+
+Note:
+  macOS will prompt for Calendar access on first use. Use --no-input to fail instead of prompting.`, nil
 	case "greta":
 		return `greta outputs a full CLI spec for AI agents.
 
@@ -1431,6 +1483,9 @@ fantastical [--version] <command> [flags] [args]
 Use Fantastical's URL handler and AppleScript integration from the command line.
 
 For parse/applescript, put flags before the sentence or use -- to separate.
+
+EventKit commands require Calendar access; macOS will prompt on first use.
+EventKit commands compile a small Swift helper (swiftc) on first use.
 
 ## COMMANDS
 See fantastical help or fantastical greta --format json.
@@ -1639,7 +1694,7 @@ func bashCompletion() string {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local cmds="parse show applescript validate doctor greta explain man as completion help version"
+  local cmds="parse show applescript validate doctor eventkit greta explain man as completion help version"
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
     return 0
@@ -1675,6 +1730,25 @@ func bashCompletion() string {
     doctor)
       local flags="--json --skip-app --verbose --help"
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+      ;;
+    eventkit)
+      local subs="calendars events"
+      if [[ $COMP_CWORD -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
+        return 0
+      fi
+      local sub="${COMP_WORDS[2]}"
+      if [[ "$sub" == "calendars" ]]; then
+        local flags="--json --plain --no-input --verbose --help"
+        COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+        return 0
+      fi
+      if [[ "$sub" == "events" ]]; then
+        local flags="--json --plain --no-input --verbose --calendar --from --to --limit --include-all-day --include-declined --help"
+        COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+        return 0
+      fi
+      COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
       ;;
     greta)
       local flags="--format --schema --examples --capabilities --help"
@@ -1716,6 +1790,7 @@ _fantastical() {
     'applescript:Run Fantastical AppleScript'
     'validate:Validate input and print URL'
     'doctor:Check Fantastical integration'
+    'eventkit:List calendars or events via EventKit'
     'greta:CLI spec for agents'
     'explain:Human-readable command walkthrough'
     'man:Manual page output'
@@ -1789,6 +1864,37 @@ _fantastical() {
             '--skip-app[Skip app check]' \
             '--verbose[Verbose output]'
           ;;
+        eventkit)
+          if (( CURRENT == 3 )); then
+            _arguments '1:sub:(calendars events)'
+            return
+          fi
+          case $words[3] in
+            calendars)
+              _arguments \
+                '--json[JSON output]' \
+                '--plain[Plain output]' \
+                '--no-input[Do not prompt for access]' \
+                '--verbose[Verbose output]'
+              ;;
+            events)
+              _arguments \
+                '--json[JSON output]' \
+                '--plain[Plain output]' \
+                '--no-input[Do not prompt for access]' \
+                '--verbose[Verbose output]' \
+                '--calendar[Calendar name]' \
+                '--from[Start date/time]' \
+                '--to[End date/time]' \
+                '--limit[Limit events]' \
+                '--include-all-day[Include all-day events]' \
+                '--include-declined[Include declined events]'
+              ;;
+            *)
+              _arguments '1:sub:(calendars events)'
+              ;;
+          esac
+          ;;
         greta)
           _arguments \
             '--format[Output format (json|markdown)]' \
@@ -1797,7 +1903,7 @@ _fantastical() {
             '--capabilities[Capabilities only]'
           ;;
         explain)
-          _arguments '1:command:(parse show applescript validate doctor greta completion help version)'
+          _arguments '1:command:(parse show applescript validate doctor eventkit greta completion help version)'
           ;;
         man)
           _arguments '--format[Output format (markdown|json)]'
@@ -1806,7 +1912,7 @@ _fantastical() {
           _arguments '1:sub:(install uninstall bash zsh fish)'
           ;;
         help)
-          _arguments '--json[JSON output]' '1:command:(parse show applescript validate doctor greta explain man completion help version)'
+          _arguments '--json[JSON output]' '1:command:(parse show applescript validate doctor eventkit greta explain man completion help version)'
           ;;
       esac
       ;;
@@ -1818,7 +1924,7 @@ _fantastical "$@"`
 
 func fishCompletion() string {
 	return `complete -c fantastical -f
-complete -c fantastical -n '__fish_use_subcommand' -a 'parse show applescript validate doctor greta explain man completion help version' -d 'fantastical command'
+complete -c fantastical -n '__fish_use_subcommand' -a 'parse show applescript validate doctor eventkit greta explain man completion help version' -d 'fantastical command'
 
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l note -d 'Optional note'
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -s n -d 'Optional note'
@@ -1864,15 +1970,26 @@ complete -c fantastical -n '__fish_seen_subcommand_from validate' -a 'parse show
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l json -d 'JSON output'
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l skip-app -d 'Skip app check'
 complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l verbose -d 'Verbose output'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -a 'calendars events' -d 'EventKit target'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l json -d 'JSON output'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l plain -d 'Plain output'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l no-input -d 'Do not prompt for access'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l verbose -d 'Verbose output'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l calendar -d 'Calendar name'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l from -d 'Start date/time'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l to -d 'End date/time'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l limit -d 'Limit events'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l include-all-day -d 'Include all-day events'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l include-declined -d 'Include declined events'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l format -d 'Format'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l schema -d 'Schema'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l examples -d 'Examples only'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l capabilities -d 'Capabilities only'
-complete -c fantastical -n '__fish_seen_subcommand_from explain' -a 'parse show applescript validate doctor greta completion help version' -d 'Command'
+complete -c fantastical -n '__fish_seen_subcommand_from explain' -a 'parse show applescript validate doctor eventkit greta completion help version' -d 'Command'
 complete -c fantastical -n '__fish_seen_subcommand_from man' -l format -d 'Format'
 complete -c fantastical -n '__fish_seen_subcommand_from completion' -a 'install uninstall bash zsh fish' -d 'Shell'
 complete -c fantastical -n '__fish_seen_subcommand_from help' -l json -d 'JSON output'
-complete -c fantastical -n '__fish_seen_subcommand_from help' -a 'parse show applescript validate doctor greta explain man completion help version' -d 'Command'`
+complete -c fantastical -n '__fish_seen_subcommand_from help' -a 'parse show applescript validate doctor eventkit greta explain man completion help version' -d 'Command'`
 }
 
 func buildParseURL(sentence, note, calendar string, add bool, extra url.Values) string {

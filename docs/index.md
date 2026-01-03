@@ -11,6 +11,7 @@ macOS only (Fantastical is a macOS app).
 - `applescript` — Send a sentence to Fantastical via AppleScript
 - `validate` — Validate parse/show input and print the URL
 - `doctor` — Check Fantastical integration status
+- `eventkit` — List calendars or events via EventKit (system Calendar access)
 - `greta` — Machine-readable CLI spec for agents
 - `explain` — Human-readable command walkthrough
 - `man` — Manual page output (markdown or json)
@@ -30,6 +31,10 @@ macOS only (Fantastical is a macOS app).
 - `--param key=value` lets you pass additional Fantastical query params.
 - `--timezone` sets `tz=...` on URL queries.
 - For `parse`/`applescript`, place flags before the sentence or use `--` to separate.
+
+## EventKit
+
+`eventkit` commands access the system Calendar database via EventKit. macOS will prompt for Calendar access on first use. The helper is compiled with `swiftc` (Xcode Command Line Tools) the first time you run an `eventkit` command.
 
 ## Configuration
 
@@ -57,6 +62,8 @@ fantastical show --view month 2026-01-03
 fantastical show --calendar-set "Work"
 fantastical validate show month 2026-01-03
 fantastical doctor --json
+fantastical eventkit calendars --json
+fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
 fantastical greta --format json
 fantastical help --json parse
 fantastical man --format json

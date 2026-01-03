@@ -37,6 +37,7 @@ go install github.com/vburojevic/fantastical-cli@latest
 fantastical parse --add --calendar "Work" --note "Alarm" "Wake up at 8am"
 fantastical show --view month 2026-01-03
 fantastical applescript --add "Daily standup at 9am"
+fantastical eventkit calendars --json
 ```
 
 ## Flag ordering (important)
@@ -55,6 +56,7 @@ fantastical parse --add --calendar "Personal" -- "Test event today at 22:00"
 - `applescript` — Send a sentence to Fantastical via AppleScript
 - `validate` — Validate parse/show input and print the URL
 - `doctor` — Check Fantastical integration status
+- `eventkit` — List calendars or events via EventKit (system Calendar access)
 - `greta` — Machine‑readable CLI spec for agents
 - `explain` — Human‑readable command walkthrough
 - `man` — Manual page output (markdown or json)
@@ -66,6 +68,17 @@ fantastical parse --add --calendar "Personal" -- "Test event today at 22:00"
 - `--json`: machine‑readable output (`command`, `url`, `open`, `copy`, `dry_run`).
 - `--plain`: stable plain‑text output (just the URL).
 - `--dry-run`: disable open/copy side effects.
+
+## EventKit access
+
+`eventkit` commands read calendars and events via EventKit. macOS will prompt for Calendar access on first use. The helper is compiled with `swiftc` (Xcode Command Line Tools) the first time you run an `eventkit` command.
+
+Examples:
+
+```sh
+fantastical eventkit calendars --json
+fantastical eventkit events --from 2026-01-03 --to 2026-01-04 --calendar "Work"
+```
 
 ## Input
 
@@ -108,6 +121,7 @@ FANTASTICAL_DEFAULT_ADD=1
 FANTASTICAL_APPLESCRIPT_ADD=1
 FANTASTICAL_APPLESCRIPT_RUN=1
 FANTASTICAL_APPLESCRIPT_PRINT=0
+FANTASTICAL_EVENTKIT_HELPER=/path/to/eventkit-helper
 ```
 
 ## AI agents (Codex, Claude Code)
