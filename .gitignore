@@ -1,0 +1,18 @@
+# Binaries
+/fantastical
+/bin/
+/dist/
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE/editor
+.idea/
+.vscode/
+.DS_Store

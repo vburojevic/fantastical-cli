@@ -1,0 +1,40 @@
+version: 2
+
+project_name: fantastical
+
+builds:
+  - main: .
+    binary: fantastical
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+brews:
+  - name: fantastical
+    description: "CLI for Fantastical URL handler and AppleScript"
+    homepage: "https://github.com/vedranburojevic/fantastical-cli"
+    license: "MIT"
+    folder: Formula
+    tap:
+      owner: vedranburojevic
+      name: fantastical-cli
+      branch: main
+    install: |
+      bin.install "fantastical"
+    test: |
+      system "#{bin}/fantastical", "--version"
