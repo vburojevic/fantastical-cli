@@ -3,6 +3,7 @@ class Fantastical < Formula
   homepage "https://github.com/vburojevic/fantastical-cli"
   head "https://github.com/vburojevic/fantastical-cli.git", branch: "main"
   license "MIT"
+  depends_on :macos
 
   depends_on "go" => :build
 
