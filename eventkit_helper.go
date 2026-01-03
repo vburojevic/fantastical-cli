@@ -152,6 +152,11 @@ func ensureAuthorized(store: EKEventStore, noInput: Bool) -> Bool {
     switch status {
     case .authorized:
         return true
+    case .fullAccess:
+        return true
+    case .writeOnly:
+        eprintln("Calendar access is write-only; cannot list events.")
+        return false
     case .notDetermined:
         if noInput {
             eprintln("Calendar access not granted. Re-run without --no-input to trigger the permission prompt.")
@@ -207,9 +212,20 @@ func calendarTypeName(_ type: EKCalendarType) -> String {
     case .exchange: return "exchange"
     case .subscription: return "subscription"
     case .birthday: return "birthday"
-    case .other: return "other"
     @unknown default: return "unknown"
     }
+}
+
+func isDeclinedByCurrentUser(_ event: EKEvent) -> Bool {
+    guard let attendees = event.attendees else {
+        return false
+    }
+    for attendee in attendees where attendee.isCurrentUser {
+        if attendee.participantStatus == .declined {
+            return true
+        }
+    }
+    return false
 }
 
 func outputCalendars(_ calendars: [EKCalendar], format: String) {
@@ -311,7 +327,7 @@ if let (command, opts) = parseArgs(args) {
             events = events.filter { !$0.isAllDay }
         }
         if !opts.includeDeclined {
-            events = events.filter { $0.participationStatus != .declined }
+            events = events.filter { !isDeclinedByCurrentUser($0) }
         }
 
         events.sort { $0.startDate < $1.startDate }
