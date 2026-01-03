@@ -13,7 +13,7 @@
 //
 // Examples:
 //
-//	./fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
+//	./fantastical parse --add --calendar "Work" --note "Alarm" "Wake up at 8am"
 //	./fantastical show mini today
 //	./fantastical show calendar 2026-01-03
 //	./fantastical show set "My Calendar Set"
@@ -124,9 +124,10 @@ NOTES
   - macOS only (Fantastical is a macOS app).
   - --open defaults to true (uses "open <url>").
   - Use --json for machine-readable output; use --plain for stable text output.
+  - For parse/applescript, put flags before the sentence or use -- to separate.
 
 EXAMPLES
-  fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
+  fantastical parse --add --calendar "Work" --note "Alarm" "Wake up at 8am"
   fantastical parse --print "Dinner with Sam tomorrow 7pm"
   fantastical parse --stdin --json < input.txt
   fantastical show mini today
@@ -365,7 +366,8 @@ func newParseFlagSet(w io.Writer, defaults parseOptions) (*flag.FlagSet, *parseO
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical parse [flags] <sentence...>\n")
 		fs.PrintDefaults()
-		fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical parse \"Wake up at 8am\" --add --calendar Work --note \"Alarm\"")
+		fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical parse --add --calendar Work --note \"Alarm\" \"Wake up at 8am\"")
+		fmt.Fprintln(w, "NOTE:\n  Put flags before the sentence, or use -- to separate flags from the sentence.")
 	}
 
 	return fs, &opts
@@ -678,6 +680,7 @@ func newAppleScriptFlagSet(w io.Writer, defaults appleScriptOptions) (*flag.Flag
 		fmt.Fprint(w, "USAGE:\n  fantastical applescript|as [flags] <sentence...>\n")
 		fs.PrintDefaults()
 		fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical applescript --add \"Wake up at 8am\"")
+		fmt.Fprintln(w, "NOTE:\n  Put flags before the sentence, or use -- to separate flags from the sentence.")
 	}
 
 	return fs, &opts
@@ -1010,6 +1013,9 @@ func gretaSpec(schema string) map[string]any {
 		"name":          appName,
 		"description":   "CLI for Fantastical URL handler and AppleScript integration (macOS only)",
 		"usage":         "fantastical [--version] <command> [flags] [args]",
+		"notes": []string{
+			"For parse/applescript, put flags before the sentence or use -- to separate.",
+		},
 		"commands": []map[string]any{
 			{
 				"name":        "parse",
@@ -1153,6 +1159,7 @@ func gretaMarkdown() string {
 - Name: fantastical
 - Usage: fantastical [--version] <command> [flags] [args]
 - macOS only
+- Note: for parse/applescript, put flags before the sentence or use -- to separate.
 
 ## Commands
 - parse: build x-fantastical3://parse URL
@@ -1179,7 +1186,7 @@ func gretaExamples(schema string) map[string]any {
 		"examples": []map[string]any{
 			{
 				"description": "Create an event with a calendar and note",
-				"command":     `fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"`,
+				"command":     `fantastical parse --add --calendar "Work" --note "Alarm" "Wake up at 8am"`,
 			},
 			{
 				"description": "Build a URL without opening (JSON output)",
@@ -1209,7 +1216,7 @@ func gretaExamplesMarkdown() string {
 	return `# fantastical examples
 
 - Create an event with a calendar and note:
-  fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
+  fantastical parse --add --calendar "Work" --note "Alarm" "Wake up at 8am"
 - Build a URL without opening (JSON output):
   fantastical parse --json "Dinner tomorrow 7pm"
 - Show month view on a specific date:
@@ -1283,10 +1290,11 @@ func explainText(command string) (string, error) {
 		return `parse builds an x-fantastical3://parse URL from a natural language sentence.
 
 Common usage:
-  fantastical parse "Meet Sam tomorrow 3pm" --add --calendar "Work"
+  fantastical parse --add --calendar "Work" "Meet Sam tomorrow 3pm"
 
 Flags:
   --note, --calendar, --add control Fantastical's parse behavior.
+  Put flags before the sentence, or use -- to separate flags from the sentence.
   --param key=value lets you pass extra Fantastical query params.
   --timezone sets tz=... for the URL.
   --json outputs machine-readable JSON with the URL.
@@ -1421,6 +1429,8 @@ fantastical [--version] <command> [flags] [args]
 
 ## DESCRIPTION
 Use Fantastical's URL handler and AppleScript integration from the command line.
+
+For parse/applescript, put flags before the sentence or use -- to separate.
 
 ## COMMANDS
 See fantastical help or fantastical greta --format json.

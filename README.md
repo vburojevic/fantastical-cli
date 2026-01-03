@@ -34,9 +34,18 @@ go install github.com/vburojevic/fantastical-cli@latest
 ## Quickstart
 
 ```sh
-fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
+fantastical parse --add --calendar "Work" --note "Alarm" "Wake up at 8am"
 fantastical show --view month 2026-01-03
 fantastical applescript --add "Daily standup at 9am"
+```
+
+## Flag ordering (important)
+
+For `parse` (and `applescript`), put flags before the sentence, or use `--` to separate flags from the sentence. Otherwise flags are treated as part of the sentence.
+
+```sh
+fantastical parse --add --calendar "Personal" "Test event today at 22:00"
+fantastical parse --add --calendar "Personal" -- "Test event today at 22:00"
 ```
 
 ## Commands

@@ -29,6 +29,7 @@ macOS only (Fantastical is a macOS app).
 - `--stdin` reads the sentence from stdin for `parse` and `applescript`.
 - `--param key=value` lets you pass additional Fantastical query params.
 - `--timezone` sets `tz=...` on URL queries.
+- For `parse`/`applescript`, place flags before the sentence or use `--` to separate.
 
 ## Configuration
 
@@ -50,7 +51,7 @@ Example:
 ## Examples
 
 ```sh
-fantastical parse "Dinner with Sam tomorrow 7pm" --print
+fantastical parse --print "Dinner with Sam tomorrow 7pm"
 fantastical parse --stdin --json < input.txt
 fantastical show --view month 2026-01-03
 fantastical show --calendar-set "Work"

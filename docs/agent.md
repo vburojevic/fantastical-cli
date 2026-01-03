@@ -36,3 +36,10 @@ Use `--json` with `parse`, `show`, `validate`, and `doctor` for machine-readable
 
 - macOS only (Fantastical is a macOS app).
 - `--dry-run` disables opening/copying URLs.
+- For `parse`/`applescript`, put flags before the sentence or use `--` to separate.
+
+Example:
+
+```sh
+fantastical parse --add --calendar "Personal" "Test event today at 22:00"
+```
