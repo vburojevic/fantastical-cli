@@ -142,6 +142,19 @@ func TestCmdParseJSON(t *testing.T) {
 	}
 }
 
+func TestCmdParseTimezone(t *testing.T) {
+	setupTestEnv(t)
+
+	var out, errOut bytes.Buffer
+	err := cmdParse([]string{"--open=false", "--print", "--timezone", "America/Los_Angeles", "Hello"}, strings.NewReader(""), &out, &errOut)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "tz=America%2FLos_Angeles") {
+		t.Fatalf("expected tz param in output: %q", out.String())
+	}
+}
+
 func TestCmdParseMissingSentence(t *testing.T) {
 	setupTestEnv(t)
 
@@ -166,11 +179,11 @@ func TestCmdShowMiniDate(t *testing.T) {
 	}
 }
 
-func TestCmdShowGenericView(t *testing.T) {
+func TestCmdShowViewFlag(t *testing.T) {
 	setupTestEnv(t)
 
 	var out, errOut bytes.Buffer
-	if err := cmdShow([]string{"--open=false", "--print", "month", "2026-01-03"}, &out, &errOut); err != nil {
+	if err := cmdShow([]string{"--open=false", "--print", "--view", "month", "2026-01-03"}, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expected := fantasticalScheme + "show/month/2026-01-03\n"
@@ -179,18 +192,30 @@ func TestCmdShowGenericView(t *testing.T) {
 	}
 }
 
-func TestCmdShowSet(t *testing.T) {
+func TestCmdShowCalendarSetFlag(t *testing.T) {
 	setupTestEnv(t)
 
 	var out, errOut bytes.Buffer
-	if err := cmdShow([]string{"--open=false", "--print", "set", "My", "Calendar", "Set"}, &out, &errOut); err != nil {
+	if err := cmdShow([]string{"--open=false", "--print", "--calendar-set", "My Set"}, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	q := url.Values{}
-	q.Set("name", "My Calendar Set")
+	q.Set("name", "My Set")
 	expected := fantasticalScheme + "show/set?" + encodeQuery(q) + "\n"
 	if out.String() != expected {
 		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestCmdShowTimezone(t *testing.T) {
+	setupTestEnv(t)
+
+	var out, errOut bytes.Buffer
+	if err := cmdShow([]string{"--open=false", "--print", "--timezone", "UTC", "month", "2026-01-03"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "tz=UTC") {
+		t.Fatalf("expected tz param in output: %q", out.String())
 	}
 }
 
@@ -232,6 +257,38 @@ func TestCmdAppleScriptStdin(t *testing.T) {
 	}
 }
 
+func TestCmdValidateParse(t *testing.T) {
+	setupTestEnv(t)
+
+	var out, errOut bytes.Buffer
+	if err := cmdValidate([]string{"parse", "Wake"}, strings.NewReader(""), &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "x-fantastical3://parse") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestCmdDoctorJSON(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := cmdDoctor([]string{"--json", "--skip-app"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"osascript\"") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
+func TestCmdGretaJSON(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := cmdGreta([]string{"--format", "json"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"commands\"") {
+		t.Fatalf("unexpected output: %q", out.String())
+	}
+}
+
 func TestCmdCompletionBash(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if err := cmdCompletion([]string{"bash"}, &out, &errOut); err != nil {
@@ -254,6 +311,23 @@ func TestCmdCompletionInstall(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "_fantastical_completions") {
 		t.Fatalf("unexpected completion contents: %q", string(data))
+	}
+}
+
+func TestCmdCompletionUninstall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "completions", "fantastical")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	var out, errOut bytes.Buffer
+	if err := cmdCompletion([]string{"uninstall", "--path", path, "bash"}, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected file removed")
 	}
 }
 
@@ -384,6 +458,22 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "add=1") {
 		t.Fatalf("expected add=1 in output: %q", out.String())
+	}
+}
+
+func TestConfigOverrideFlag(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	config := `{"output":{"print":true},"parse":{"calendar":"Home"}}`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	var out, errOut bytes.Buffer
+	err := cmdParse([]string{"--config", configPath, "Meeting"}, strings.NewReader(""), &out, &errOut)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "calendarName=Home") {
+		t.Fatalf("expected calendarName in output: %q", out.String())
 	}
 }
 

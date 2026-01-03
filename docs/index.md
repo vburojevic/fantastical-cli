@@ -9,7 +9,10 @@ macOS only (Fantastical is a macOS app).
 - `parse` — Build `x-fantastical3://parse?...` URLs
 - `show` — Build `x-fantastical3://show/...` URLs
 - `applescript` — Send a sentence to Fantastical via AppleScript
-- `completion` — Print/install shell completions
+- `validate` — Validate parse/show input and print the URL
+- `doctor` — Check Fantastical integration status
+- `greta` — Machine-readable CLI spec for agents
+- `completion` — Print/install/uninstall shell completions
 
 ## Output modes
 
@@ -22,6 +25,7 @@ macOS only (Fantastical is a macOS app).
 
 - `--stdin` reads the sentence from stdin for `parse` and `applescript`.
 - `--param key=value` lets you pass additional Fantastical query params.
+- `--timezone` sets `tz=...` on URL queries.
 
 ## Configuration
 
@@ -45,6 +49,9 @@ Example:
 ```sh
 fantastical parse "Dinner with Sam tomorrow 7pm" --print
 fantastical parse --stdin --json < input.txt
-fantastical show month 2026-01-03
-fantastical applescript --add "Wake up at 8am"
+fantastical show --view month 2026-01-03
+fantastical show --calendar-set "Work"
+fantastical validate show month 2026-01-03
+fantastical doctor --json
+fantastical greta --format json
 ```

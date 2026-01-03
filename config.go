@@ -46,9 +46,13 @@ type AppleScriptConfig struct {
 }
 
 func loadConfig() (*Config, error) {
+	return loadConfigWithPath("")
+}
+
+func loadConfigWithPath(path string) (*Config, error) {
 	cfg := &Config{}
 
-	userPath, projectPath := configPaths()
+	userPath, projectPath := configPaths(path)
 	if userPath != "" {
 		readCfg, err := readConfigFile(userPath)
 		if err != nil {
@@ -69,11 +73,14 @@ func loadConfig() (*Config, error) {
 	return cfg, nil
 }
 
-func configPaths() (string, string) {
+func configPaths(override string) (string, string) {
 	envPath := strings.TrimSpace(os.Getenv("FANTASTICAL_CONFIG"))
 	userPath := envPath
 	if userPath == "" {
 		userPath = defaultUserConfigPath()
+	}
+	if strings.TrimSpace(override) != "" {
+		userPath = strings.TrimSpace(override)
 	}
 
 	projectPath := ".fantastical.json"

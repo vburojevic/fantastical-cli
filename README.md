@@ -31,12 +31,15 @@ go install github.com/vburojevic/fantastical-cli@latest
 fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
 fantastical parse --print "Dinner with Sam tomorrow 7pm"
 fantastical parse --stdin --json < input.txt
-fantastical parse --param duration=60 "Focus block"
+fantastical parse --param duration=60 --timezone "America/Los_Angeles" "Focus block"
 fantastical show mini today
-fantastical show calendar 2026-01-03
-fantastical show month 2026-01-03
+fantastical show --view month 2026-01-03
+fantastical show --calendar-set "My Calendar Set"
 fantastical show set "My Calendar Set"
 fantastical applescript --add "Wake up at 8am"
+fantastical validate parse --json "Dinner at 7"
+fantastical doctor
+fantastical greta --format json
 ```
 
 ## Output modes
@@ -51,7 +54,7 @@ By default, config is loaded from:
 - User config: `~/.config/fantastical/config.json` (or `$XDG_CONFIG_HOME`)
 - Project config: `.fantastical.json` (in the current directory)
 
-Set `FANTASTICAL_CONFIG` to override the user config path.
+Set `FANTASTICAL_CONFIG` to override the user config path, or pass `--config` per command.
 
 Example `config.json`:
 
@@ -93,6 +96,11 @@ fantastical completion fish
 fantastical completion install bash
 fantastical completion install zsh
 fantastical completion install fish
+
+# Uninstall from default user locations
+fantastical completion uninstall bash
+fantastical completion uninstall zsh
+fantastical completion uninstall fish
 
 # Install to a specific path
 fantastical completion install --path /usr/local/etc/bash_completion.d/fantastical bash

@@ -67,6 +67,12 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		err = cmdShow(args[2:], out, errOut)
 	case "applescript", "as":
 		err = cmdAppleScript(args[2:], in, out, errOut)
+	case "validate":
+		err = cmdValidate(args[2:], in, out, errOut)
+	case "doctor":
+		err = cmdDoctor(args[2:], out, errOut)
+	case "greta":
+		err = cmdGreta(args[2:], out, errOut)
 	case "completion":
 		err = cmdCompletion(args[2:], out, errOut)
 	case "help", "-h", "--help":
@@ -104,6 +110,9 @@ COMMANDS
   parse        Build (and optionally open) x-fantastical3://parse?... URLs
   show         Build (and optionally open) x-fantastical3://show/... URLs
   applescript  Send "parse sentence" to Fantastical via osascript (macOS)
+  validate     Validate parse/show input and print the URL
+  doctor       Check Fantastical + macOS integration status
+  greta        Machine-readable CLI spec for agents
   completion   Print or install shell completion (bash|zsh|fish)
   help         Show help for a command
   version      Print version information
@@ -121,6 +130,7 @@ EXAMPLES
   fantastical show month 2026-01-03
   fantastical show set "My Calendar Set"
   fantastical applescript --add "Wake up at 8am"
+  fantastical greta --format json
 `)
 }
 
@@ -141,6 +151,15 @@ func printSubcommandHelp(cmd string, w io.Writer) error {
 	case "completion":
 		fs, _ := newCompletionFlagSet(w)
 		fs.Usage()
+		return nil
+	case "validate":
+		validateUsage(w)
+		return nil
+	case "doctor":
+		doctorUsage(w)
+		return nil
+	case "greta":
+		gretaUsage(w)
 		return nil
 	default:
 		return fmt.Errorf("%w: unknown help topic %q", errUsage, cmd)
@@ -184,6 +203,8 @@ type parseOptions struct {
 	add      bool
 	stdin    bool
 	params   stringSlice
+	timezone string
+	config   string
 }
 
 func defaultOutputOptions(cfg *Config) outputOptions {
@@ -258,6 +279,8 @@ func newParseFlagSet(w io.Writer, defaults parseOptions) (*flag.FlagSet, *parseO
 	fs.BoolVar(&opts.verbose, "verbose", opts.verbose, "Verbose output to stderr")
 	fs.BoolVar(&opts.stdin, "stdin", false, "Read sentence from stdin instead of args")
 	fs.Var(&opts.params, "param", "Extra Fantastical query param (key=value), repeatable")
+	fs.StringVar(&opts.timezone, "timezone", "", "Timezone to pass as tz=... (IANA name)")
+	fs.StringVar(&opts.config, "config", "", "Config file path (overrides default user config)")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical parse [flags] <sentence...>\n")
@@ -269,7 +292,11 @@ func newParseFlagSet(w io.Writer, defaults parseOptions) (*flag.FlagSet, *parseO
 }
 
 func cmdParse(args []string, in io.Reader, out, errOut io.Writer) error {
-	cfg, err := loadConfig()
+	configPath, err := extractConfigPath(args)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfigWithPath(configPath)
 	if err != nil {
 		return err
 	}
@@ -300,6 +327,9 @@ func cmdParse(args []string, in io.Reader, out, errOut io.Writer) error {
 	if err != nil {
 		fs.Usage()
 		return err
+	}
+	if strings.TrimSpace(opts.timezone) != "" {
+		extraParams.Set("tz", strings.TrimSpace(opts.timezone))
 	}
 
 	u := buildParseURL(sentence, opts.note, opts.calendar, opts.add, extraParams)
@@ -353,6 +383,10 @@ func cmdParse(args []string, in io.Reader, out, errOut io.Writer) error {
 type showOptions struct {
 	outputOptions
 	params stringSlice
+	view   string
+	set    string
+	tz     string
+	config string
 }
 
 func defaultShowOptions(cfg *Config) showOptions {
@@ -373,18 +407,26 @@ func newShowFlagSet(w io.Writer, defaults showOptions) (*flag.FlagSet, *showOpti
 	fs.BoolVar(&opts.dryRun, "dry-run", opts.dryRun, "Preview only; do not open or copy")
 	fs.BoolVar(&opts.verbose, "verbose", opts.verbose, "Verbose output to stderr")
 	fs.Var(&opts.params, "param", "Extra Fantastical query param (key=value), repeatable")
+	fs.StringVar(&opts.view, "view", "", "View name (e.g., mini, calendar, day, week, month, agenda)")
+	fs.StringVar(&opts.set, "calendar-set", "", "Calendar set name (equivalent to: show set <name>)")
+	fs.StringVar(&opts.tz, "timezone", "", "Timezone to pass as tz=... (IANA name)")
+	fs.StringVar(&opts.config, "config", "", "Config file path (overrides default user config)")
 
 	fs.Usage = func() {
-		fmt.Fprint(w, "USAGE:\n  fantastical show [flags] <view> [yyyy-mm-dd|today|tomorrow|yesterday]\n  fantastical show [flags] set <calendar-set-name...>\n")
+		fmt.Fprint(w, "USAGE:\n  fantastical show [flags] <view> [yyyy-mm-dd|today|tomorrow|yesterday]\n  fantastical show [flags] --view <view> [date]\n  fantastical show [flags] set <calendar-set-name...>\n  fantastical show [flags] --calendar-set <name>\n")
 		fs.PrintDefaults()
-		fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical show mini today\n  fantastical show calendar 2026-01-03\n  fantastical show month 2026-01-03\n  fantastical show set \"My Calendar Set\"")
+		fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical show mini today\n  fantastical show --view month 2026-01-03\n  fantastical show --calendar-set \"My Calendar Set\"")
 	}
 
 	return fs, &opts
 }
 
 func cmdShow(args []string, out, errOut io.Writer) error {
-	cfg, err := loadConfig()
+	configPath, err := extractConfigPath(args)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfigWithPath(configPath)
 	if err != nil {
 		return err
 	}
@@ -405,27 +447,24 @@ func cmdShow(args []string, out, errOut io.Writer) error {
 	}
 
 	rest := fs.Args()
-	if len(rest) < 1 {
-		fs.Usage()
-		return fmt.Errorf("%w: missing view", errUsage)
-	}
-
-	sub := strings.ToLower(rest[0])
+	sub := strings.ToLower(strings.TrimSpace(opts.view))
 
 	extraParams, err := parseParams(opts.params)
 	if err != nil {
 		fs.Usage()
 		return err
 	}
+	if strings.TrimSpace(opts.tz) != "" {
+		extraParams.Set("tz", strings.TrimSpace(opts.tz))
+	}
 
 	var u string
-	switch sub {
-	case "set":
-		if len(rest) < 2 {
+	if strings.TrimSpace(opts.set) != "" {
+		if len(rest) > 0 || sub != "" {
 			fs.Usage()
-			return fmt.Errorf("%w: missing calendar set name", errUsage)
+			return fmt.Errorf("%w: cannot combine --calendar-set with positional view arguments", errUsage)
 		}
-		name := strings.TrimSpace(strings.Join(rest[1:], " "))
+		name := strings.TrimSpace(opts.set)
 		q := url.Values{}
 		q.Set("name", name)
 		for key, vals := range extraParams {
@@ -434,14 +473,22 @@ func cmdShow(args []string, out, errOut io.Writer) error {
 			}
 		}
 		u = fantasticalScheme + "show/set?" + encodeQuery(q)
-	default:
-		if len(rest) > 2 {
+	} else {
+		if sub == "" {
+			if len(rest) < 1 {
+				fs.Usage()
+				return fmt.Errorf("%w: missing view", errUsage)
+			}
+			sub = strings.ToLower(rest[0])
+			rest = rest[1:]
+		}
+		if len(rest) > 1 {
 			fs.Usage()
 			return fmt.Errorf("%w: too many args for %q; expected: fantastical show %s [date]", errUsage, sub, sub)
 		}
 		u = fantasticalScheme + "show/" + sub
-		if len(rest) == 2 {
-			d, err := parseDateArg(rest[1])
+		if len(rest) == 1 {
+			d, err := parseDateArg(rest[0])
 			if err != nil {
 				return err
 			}
@@ -505,6 +552,7 @@ type appleScriptOptions struct {
 	dryRun  bool
 	verbose bool
 	stdin   bool
+	config  string
 }
 
 func defaultAppleScriptOptions(cfg *Config) appleScriptOptions {
@@ -544,6 +592,7 @@ func newAppleScriptFlagSet(w io.Writer, defaults appleScriptOptions) (*flag.Flag
 	fs.BoolVar(&opts.dryRun, "dry-run", opts.dryRun, "Preview only; do not run osascript")
 	fs.BoolVar(&opts.verbose, "verbose", opts.verbose, "Verbose output to stderr")
 	fs.BoolVar(&opts.stdin, "stdin", false, "Read sentence from stdin instead of args")
+	fs.StringVar(&opts.config, "config", "", "Config file path (overrides default user config)")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical applescript|as [flags] <sentence...>\n")
@@ -555,7 +604,11 @@ func newAppleScriptFlagSet(w io.Writer, defaults appleScriptOptions) (*flag.Flag
 }
 
 func cmdAppleScript(args []string, in io.Reader, out, errOut io.Writer) error {
-	cfg, err := loadConfig()
+	configPath, err := extractConfigPath(args)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfigWithPath(configPath)
 	if err != nil {
 		return err
 	}
@@ -628,6 +681,309 @@ func cmdAppleScript(args []string, in io.Reader, out, errOut io.Writer) error {
 	return cmd.Run()
 }
 
+func validateUsage(w io.Writer) {
+	fmt.Fprint(w, "USAGE:\n  fantastical validate parse [flags] <sentence...>\n  fantastical validate show [flags] <view> [date]\n")
+	fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical validate parse --json \"Dinner at 7\"\n  fantastical validate show month 2026-01-03")
+}
+
+func cmdValidate(args []string, in io.Reader, out, errOut io.Writer) error {
+	if len(args) < 1 {
+		validateUsage(errOut)
+		return fmt.Errorf("%w: missing validate target (parse|show)", errUsage)
+	}
+
+	sub := strings.ToLower(args[0])
+	rest := args[1:]
+	rest = append([]string{"--dry-run", "--print"}, rest...)
+
+	switch sub {
+	case "parse":
+		return cmdParse(rest, in, out, errOut)
+	case "show":
+		return cmdShow(rest, out, errOut)
+	default:
+		validateUsage(errOut)
+		return fmt.Errorf("%w: unknown validate target %q (want: parse, show)", errUsage, sub)
+	}
+}
+
+type doctorOptions struct {
+	json    bool
+	verbose bool
+	skipApp bool
+}
+
+func doctorUsage(w io.Writer) {
+	fmt.Fprint(w, "USAGE:\n  fantastical doctor [--json] [--skip-app]\n")
+	fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical doctor --json")
+}
+
+func cmdDoctor(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	opts := doctorOptions{}
+	fs.BoolVar(&opts.json, "json", false, "Print machine-readable JSON output")
+	fs.BoolVar(&opts.verbose, "verbose", false, "Verbose output to stderr")
+	fs.BoolVar(&opts.skipApp, "skip-app", false, "Skip Fantastical app lookup")
+
+	fs.Usage = func() {
+		doctorUsage(errOut)
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
+	osascriptPath, osascriptErr := exec.LookPath("osascript")
+	pbcopyPath, pbcopyErr := exec.LookPath("pbcopy")
+	appErr := error(nil)
+	if !opts.skipApp {
+		appErr = exec.Command("open", "-Ra", "Fantastical").Run()
+	}
+
+	if opts.json {
+		payload := map[string]any{
+			"osascript": map[string]any{
+				"ok":   osascriptErr == nil,
+				"path": osascriptPath,
+			},
+			"pbcopy": map[string]any{
+				"ok":   pbcopyErr == nil,
+				"path": pbcopyPath,
+			},
+			"fantastical_app": map[string]any{
+				"ok":    appErr == nil,
+				"check": !opts.skipApp,
+			},
+		}
+		if err := writeJSON(out, payload); err != nil {
+			return err
+		}
+	} else {
+		if appErr == nil {
+			fmt.Fprintln(out, "Fantastical app: ok")
+		} else if opts.skipApp {
+			fmt.Fprintln(out, "Fantastical app: skipped")
+		} else {
+			fmt.Fprintln(out, "Fantastical app: not found (install from the App Store)")
+		}
+
+		if osascriptErr == nil {
+			fmt.Fprintln(out, "osascript: ok")
+		} else {
+			fmt.Fprintln(out, "osascript: missing (macOS scripting not available)")
+		}
+
+		if pbcopyErr == nil {
+			fmt.Fprintln(out, "pbcopy: ok")
+		} else {
+			fmt.Fprintln(out, "pbcopy: missing (install Xcode command line tools)")
+		}
+
+		fmt.Fprintln(out, "Automation permissions: grant Terminal access if AppleScript fails.")
+	}
+
+	if appErr != nil && !opts.skipApp {
+		return fmt.Errorf("Fantastical app not found")
+	}
+	if osascriptErr != nil {
+		return fmt.Errorf("osascript not available")
+	}
+
+	logVerbose(errOut, opts.verbose, "doctor completed")
+	return nil
+}
+
+type gretaOptions struct {
+	format string
+}
+
+func gretaUsage(w io.Writer) {
+	fmt.Fprint(w, "USAGE:\n  fantastical greta [--format json|markdown]\n")
+	fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical greta --format json")
+}
+
+func cmdGreta(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("greta", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	opts := gretaOptions{format: "json"}
+	fs.StringVar(&opts.format, "format", opts.format, "Output format: json or markdown")
+
+	fs.Usage = func() {
+		gretaUsage(errOut)
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(opts.format)) {
+	case "json":
+		return writeJSON(out, gretaSpec())
+	case "markdown":
+		fmt.Fprintln(out, gretaMarkdown())
+		return nil
+	default:
+		fs.Usage()
+		return fmt.Errorf("%w: unknown format %q (want: json, markdown)", errUsage, opts.format)
+	}
+}
+
+func gretaSpec() map[string]any {
+	return map[string]any{
+		"name":        appName,
+		"description": "CLI for Fantastical URL handler and AppleScript integration (macOS only)",
+		"usage":       "fantastical [--version] <command> [flags] [args]",
+		"commands": []map[string]any{
+			{
+				"name":        "parse",
+				"description": "Build x-fantastical3://parse URL",
+				"args":        "<sentence...>",
+				"flags": []string{
+					"--note, -n",
+					"--calendar, --calendarName",
+					"--add",
+					"--open",
+					"--print",
+					"--copy",
+					"--json",
+					"--plain",
+					"--dry-run",
+					"--verbose",
+					"--stdin",
+					"--param key=value",
+					"--timezone IANA",
+					"--config path",
+				},
+			},
+			{
+				"name":        "show",
+				"description": "Build x-fantastical3://show URL",
+				"args":        "<view> [date] | set <calendar-set-name>",
+				"flags": []string{
+					"--view",
+					"--calendar-set",
+					"--open",
+					"--print",
+					"--copy",
+					"--json",
+					"--plain",
+					"--dry-run",
+					"--verbose",
+					"--param key=value",
+					"--timezone IANA",
+					"--config path",
+				},
+			},
+			{
+				"name":        "applescript",
+				"description": "Run Fantastical AppleScript parse sentence",
+				"args":        "<sentence...>",
+				"flags": []string{
+					"--add",
+					"--run",
+					"--print",
+					"--dry-run",
+					"--verbose",
+					"--stdin",
+					"--config path",
+				},
+			},
+			{
+				"name":        "validate",
+				"description": "Validate parse/show input and print URL",
+				"args":        "parse|show ...",
+			},
+			{
+				"name":        "doctor",
+				"description": "Check Fantastical + macOS integration status",
+				"flags": []string{
+					"--json",
+					"--skip-app",
+				},
+			},
+			{
+				"name":        "greta",
+				"description": "Machine-readable CLI spec for agents",
+				"flags": []string{
+					"--format json|markdown",
+				},
+			},
+			{
+				"name":        "completion",
+				"description": "Print or install/uninstall shell completions",
+				"args":        "[bash|zsh|fish]",
+			},
+		},
+		"output": map[string]any{
+			"stdout": "URLs, JSON output, scripts, or diagnostics",
+			"stderr": "Errors and verbose logs",
+		},
+		"config": map[string]any{
+			"user":    "~/.config/fantastical/config.json",
+			"project": ".fantastical.json",
+			"env":     "FANTASTICAL_CONFIG overrides user config path",
+			"order":   "flags > env > project config > user config",
+		},
+		"env": []string{
+			"FANTASTICAL_DEFAULT_OPEN",
+			"FANTASTICAL_DEFAULT_PRINT",
+			"FANTASTICAL_DEFAULT_COPY",
+			"FANTASTICAL_DEFAULT_JSON",
+			"FANTASTICAL_DEFAULT_PLAIN",
+			"FANTASTICAL_DRY_RUN",
+			"FANTASTICAL_VERBOSE",
+			"FANTASTICAL_DEFAULT_CALENDAR",
+			"FANTASTICAL_DEFAULT_NOTE",
+			"FANTASTICAL_DEFAULT_ADD",
+			"FANTASTICAL_APPLESCRIPT_ADD",
+			"FANTASTICAL_APPLESCRIPT_RUN",
+			"FANTASTICAL_APPLESCRIPT_PRINT",
+		},
+		"exit_codes": map[string]int{
+			"success": 0,
+			"usage":   2,
+			"error":   1,
+		},
+	}
+}
+
+func gretaMarkdown() string {
+	return `# fantastical CLI spec
+
+- Name: fantastical
+- Usage: fantastical [--version] <command> [flags] [args]
+- macOS only
+
+## Commands
+- parse: build x-fantastical3://parse URL
+- show: build x-fantastical3://show URL
+- applescript: run Fantastical AppleScript parse sentence
+- validate: validate parse/show input and print URL
+- doctor: check Fantastical + macOS integration status
+- greta: machine-readable CLI spec for agents
+- completion: print/install/uninstall shell completions
+
+## Config
+- User: ~/.config/fantastical/config.json
+- Project: .fantastical.json
+- Env override: FANTASTICAL_CONFIG
+- Precedence: flags > env > project config > user config
+`
+}
+
 type completionOptions struct{}
 
 type completionInstallOptions struct {
@@ -641,8 +997,8 @@ func newCompletionFlagSet(w io.Writer) (*flag.FlagSet, *completionOptions) {
 	fs.SetOutput(io.Discard)
 
 	fs.Usage = func() {
-		fmt.Fprint(w, "USAGE:\n  fantastical completion [bash|zsh|fish]\n  fantastical completion install [--path <path>] [bash|zsh|fish]\n")
-		fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical completion zsh\n  fantastical completion install fish")
+		fmt.Fprint(w, "USAGE:\n  fantastical completion [bash|zsh|fish]\n  fantastical completion install [--path <path>] [bash|zsh|fish]\n  fantastical completion uninstall [--path <path>] [bash|zsh|fish]\n")
+		fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical completion zsh\n  fantastical completion install fish\n  fantastical completion uninstall zsh")
 	}
 
 	return fs, opts
@@ -668,6 +1024,9 @@ func cmdCompletion(args []string, out, errOut io.Writer) error {
 
 	if rest[0] == "install" {
 		return cmdCompletionInstall(rest[1:], out, errOut)
+	}
+	if rest[0] == "uninstall" {
+		return cmdCompletionUninstall(rest[1:], out, errOut)
 	}
 
 	shell := strings.ToLower(strings.TrimSpace(rest[0]))
@@ -730,6 +1089,76 @@ func cmdCompletionInstall(args []string, out, errOut io.Writer) error {
 	return nil
 }
 
+func extractConfigPath(args []string) (string, error) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if strings.HasPrefix(arg, "--config=") {
+			value := strings.TrimPrefix(arg, "--config=")
+			if strings.TrimSpace(value) == "" {
+				return "", fmt.Errorf("%w: --config requires a value", errUsage)
+			}
+			return value, nil
+		}
+		if arg == "--config" {
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("%w: --config requires a value", errUsage)
+			}
+			return args[i+1], nil
+		}
+	}
+	return "", nil
+}
+
+func cmdCompletionUninstall(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("completion uninstall", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	opts := completionInstallOptions{}
+	fs.StringVar(&opts.path, "path", "", "Completion path (defaults to a user-local location)")
+
+	fs.Usage = func() {
+		fmt.Fprint(errOut, "USAGE:\n  fantastical completion uninstall [--path <path>] [bash|zsh|fish]\n")
+		fmt.Fprintln(errOut, "\nEXAMPLE:\n  fantastical completion uninstall zsh")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return fmt.Errorf("%w: missing shell name (bash|zsh|fish)", errUsage)
+	}
+
+	shell := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
+	path := opts.path
+	if path == "" {
+		var err error
+		path, err = defaultCompletionPath(shell)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("completion not found at %s", path)
+		}
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+
+	fmt.Fprintf(out, "removed completion from %s\n", path)
+	return nil
+}
+
 func completionScript(shell string) (string, error) {
 	switch shell {
 	case "bash":
@@ -749,7 +1178,7 @@ func bashCompletion() string {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local cmds="parse show applescript as completion help version"
+  local cmds="parse show applescript validate doctor greta as completion help version"
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
     return 0
@@ -757,11 +1186,11 @@ func bashCompletion() string {
 
   case "${COMP_WORDS[1]}" in
     parse)
-      local flags="--note -n --calendar --calendarName --add --open --print --copy --json --plain --dry-run --verbose --stdin --param --help"
+      local flags="--note -n --calendar --calendarName --add --open --print --copy --json --plain --dry-run --verbose --stdin --param --timezone --config --help"
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     show)
-      local flags="--open --print --copy --json --plain --dry-run --verbose --param --help"
+      local flags="--open --print --copy --json --plain --dry-run --verbose --param --view --calendar-set --timezone --config --help"
       local subs="mini calendar day week month agenda set"
       if [[ $COMP_CWORD -eq 2 ]]; then
         COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
@@ -770,11 +1199,23 @@ func bashCompletion() string {
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     applescript|as)
-      local flags="--add --run --print --dry-run --verbose --stdin --help"
+      local flags="--add --run --print --dry-run --verbose --stdin --config --help"
+      COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+      ;;
+    validate)
+      local subs="parse show"
+      COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
+      ;;
+    doctor)
+      local flags="--json --skip-app --verbose --help"
+      COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+      ;;
+    greta)
+      local flags="--format --help"
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     completion)
-      local subs="install bash zsh fish"
+      local subs="install uninstall bash zsh fish"
       COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
       ;;
     help)
@@ -795,6 +1236,9 @@ _fantastical() {
     'parse:Build x-fantastical3://parse URL'
     'show:Build x-fantastical3://show URL'
     'applescript:Run Fantastical AppleScript'
+    'validate:Validate input and print URL'
+    'doctor:Check Fantastical integration'
+    'greta:CLI spec for agents'
     'completion:Generate shell completion'
     'help:Show help for a command'
     'version:Print version information'
@@ -825,7 +1269,9 @@ _fantastical() {
             '--dry-run[Preview only]' \
             '--verbose[Verbose output]' \
             '--stdin[Read from stdin]' \
-            '--param[Extra query param]'
+            '--param[Extra query param]' \
+            '--timezone[Timezone (tz)]' \
+            '--config[Config file path]'
           ;;
         show)
           _arguments '1:target:(mini calendar day week month agenda set)' '*:date or name:' \
@@ -836,7 +1282,11 @@ _fantastical() {
             '--plain[Plain output]' \
             '--dry-run[Preview only]' \
             '--verbose[Verbose output]' \
-            '--param[Extra query param]'
+            '--param[Extra query param]' \
+            '--view[View name]' \
+            '--calendar-set[Calendar set]' \
+            '--timezone[Timezone (tz)]' \
+            '--config[Config file path]'
           ;;
         applescript|as)
           _arguments '*:sentence:' \
@@ -845,13 +1295,26 @@ _fantastical() {
             '--print[Print script]' \
             '--dry-run[Preview only]' \
             '--verbose[Verbose output]' \
-            '--stdin[Read from stdin]'
+            '--stdin[Read from stdin]' \
+            '--config[Config file path]'
+          ;;
+        validate)
+          _arguments '1:target:(parse show)' '*:args:'
+          ;;
+        doctor)
+          _arguments \
+            '--json[JSON output]' \
+            '--skip-app[Skip app check]' \
+            '--verbose[Verbose output]'
+          ;;
+        greta)
+          _arguments '--format[Output format (json|markdown)]'
           ;;
         completion)
-          _arguments '1:sub:(install bash zsh fish)'
+          _arguments '1:sub:(install uninstall bash zsh fish)'
           ;;
         help)
-          _arguments '1:command:(parse show applescript completion help version)'
+          _arguments '1:command:(parse show applescript validate doctor greta completion help version)'
           ;;
       esac
       ;;
@@ -863,7 +1326,7 @@ _fantastical "$@"`
 
 func fishCompletion() string {
 	return `complete -c fantastical -f
-complete -c fantastical -n '__fish_use_subcommand' -a 'parse show applescript completion help version' -d 'fantastical command'
+complete -c fantastical -n '__fish_use_subcommand' -a 'parse show applescript validate doctor greta completion help version' -d 'fantastical command'
 
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l note -d 'Optional note'
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -s n -d 'Optional note'
@@ -879,6 +1342,8 @@ complete -c fantastical -n '__fish_seen_subcommand_from parse' -l dry-run -d 'Pr
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l verbose -d 'Verbose output'
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l stdin -d 'Read from stdin'
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l param -d 'Extra query param'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l timezone -d 'Timezone (tz)'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l config -d 'Config file path'
 
 complete -c fantastical -n '__fish_seen_subcommand_from show' -a 'mini calendar day week month agenda set' -d 'Show target'
 complete -c fantastical -n '__fish_seen_subcommand_from show' -l open -d 'Open URL'
@@ -889,6 +1354,10 @@ complete -c fantastical -n '__fish_seen_subcommand_from show' -l plain -d 'Plain
 complete -c fantastical -n '__fish_seen_subcommand_from show' -l dry-run -d 'Preview only'
 complete -c fantastical -n '__fish_seen_subcommand_from show' -l verbose -d 'Verbose output'
 complete -c fantastical -n '__fish_seen_subcommand_from show' -l param -d 'Extra query param'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l view -d 'View name'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l calendar-set -d 'Calendar set'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l timezone -d 'Timezone (tz)'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l config -d 'Config file path'
 
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l add -d 'Add immediately'
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l run -d 'Run osascript'
@@ -896,9 +1365,14 @@ complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l print -d
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l dry-run -d 'Preview only'
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l verbose -d 'Verbose output'
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l stdin -d 'Read from stdin'
+complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l config -d 'Config file path'
 
-complete -c fantastical -n '__fish_seen_subcommand_from completion' -a 'install bash zsh fish' -d 'Shell'
-complete -c fantastical -n '__fish_seen_subcommand_from help' -a 'parse show applescript completion help version' -d 'Command'`
+complete -c fantastical -n '__fish_seen_subcommand_from validate' -a 'parse show' -d 'Validate target'
+complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l json -d 'JSON output'
+complete -c fantastical -n '__fish_seen_subcommand_from doctor' -l skip-app -d 'Skip app check'
+complete -c fantastical -n '__fish_seen_subcommand_from greta' -l format -d 'Format'
+complete -c fantastical -n '__fish_seen_subcommand_from completion' -a 'install uninstall bash zsh fish' -d 'Shell'
+complete -c fantastical -n '__fish_seen_subcommand_from help' -a 'parse show applescript validate doctor greta completion help version' -d 'Command'`
 }
 
 func buildParseURL(sentence, note, calendar string, add bool, extra url.Values) string {
