@@ -1,19 +1,25 @@
 # fantastical
 
-A tiny CLI wrapper around Fantastical's URL handler and AppleScript integration.
+A macOS‑only CLI wrapper around Fantastical’s URL handler and AppleScript integration.
+
+## Why
+
+- Fast event creation via natural language.
+- Scriptable calendar view switching.
+- Safe, machine‑readable outputs for automation.
 
 ## Install
 
 ### Homebrew (tap)
 
-This repo ships a Homebrew formula. After the first tagged release, you can:
+After the first tagged release:
 
 ```sh
 brew tap vburojevic/fantastical-cli
 brew install fantastical
 ```
 
-Until then, install the latest commit with:
+Until then, install the latest commit:
 
 ```sh
 brew install --HEAD fantastical
@@ -25,28 +31,38 @@ brew install --HEAD fantastical
 go install github.com/vburojevic/fantastical-cli@latest
 ```
 
-## Usage
+## Quickstart
 
 ```sh
 fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
-fantastical parse --print "Dinner with Sam tomorrow 7pm"
-fantastical parse --stdin --json < input.txt
-fantastical parse --param duration=60 --timezone "America/Los_Angeles" "Focus block"
 fantastical show --view month 2026-01-03
-fantastical show --calendar-set "My Calendar Set"
-fantastical applescript --add "Wake up at 8am"
-fantastical validate --json parse "Dinner at 7"
-fantastical doctor
-fantastical greta --format json
-fantastical help --json parse
-fantastical explain parse
-fantastical man --format json
+fantastical applescript --add "Daily standup at 9am"
 ```
+
+## Commands
+
+- `parse` — Build `x-fantastical3://parse?...` URLs
+- `show` — Build `x-fantastical3://show/...` URLs
+- `applescript` — Send a sentence to Fantastical via AppleScript
+- `validate` — Validate parse/show input and print the URL
+- `doctor` — Check Fantastical integration status
+- `greta` — Machine‑readable CLI spec for agents
+- `explain` — Human‑readable command walkthrough
+- `man` — Manual page output (markdown or json)
+- `completion` — Print/install/uninstall shell completions
+- `help` — Show help for a command (use `--json` for machine output)
 
 ## Output modes
 
-- `--json`: machine-readable output (`command`, `url`, `open`, `copy`, `dry_run`).
-- `--plain`: stable plain text output (just the URL).
+- `--json`: machine‑readable output (`command`, `url`, `open`, `copy`, `dry_run`).
+- `--plain`: stable plain‑text output (just the URL).
+- `--dry-run`: disable open/copy side effects.
+
+## Input
+
+- `--stdin` reads the sentence from stdin for `parse` and `applescript`.
+- `--param key=value` passes additional Fantastical query params.
+- `--timezone` sets `tz=...` on URL queries.
 
 ## Config
 
@@ -85,6 +101,19 @@ FANTASTICAL_APPLESCRIPT_RUN=1
 FANTASTICAL_APPLESCRIPT_PRINT=0
 ```
 
+## AI agents (Codex, Claude Code)
+
+Start here:
+
+- `fantastical greta --format json` — full CLI spec
+- `fantastical greta --examples` — curated examples
+- `fantastical greta --capabilities` — supported views/features
+- `fantastical help --json [command]` — command‑level JSON help
+- `fantastical man --format json` — manual in JSON
+- `fantastical validate --json <parse|show> ...` — safe validation
+
+Agent docs: `docs/agent.md`
+
 ## Shell completion
 
 ```sh
@@ -107,21 +136,17 @@ fantastical completion uninstall fish
 fantastical completion install --path /usr/local/etc/bash_completion.d/fantastical bash
 ```
 
-## Agent discovery
+## Development
 
-- `fantastical greta --format json` — full CLI spec
-- `fantastical greta --examples` — curated examples
-- `fantastical greta --capabilities` — supported views/features
-- `fantastical help --json [command]` — command-level JSON help
-- `fantastical man --format json` — manual in JSON
-
-See `docs/agent.md` for more details.
+```sh
+go test ./...
+go build ./...
+```
 
 ## Notes
 
 - macOS only (Fantastical is a macOS app).
 - `--open` defaults to true (uses `open <url>`).
-- `--dry-run` disables `--open` and `--copy` for safe previews.
 
 ## Docs
 
