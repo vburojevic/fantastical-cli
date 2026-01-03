@@ -30,7 +30,7 @@ brews:
     directory: Formula
     repository:
       owner: vburojevic
-      name: fantastical-cli
+      name: homebrew-fantastical-cli
       branch: main
     install: |
       bin.install "fantastical"
