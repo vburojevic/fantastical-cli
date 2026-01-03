@@ -15,14 +15,14 @@ A macOS‑only CLI wrapper around Fantastical’s URL handler and AppleScript in
 After the first tagged release:
 
 ```sh
-brew tap vburojevic/fantastical-cli
+brew tap vburojevic/tap
 brew install fantastical-cli
 ```
 
 Until then, install the latest commit:
 
 ```sh
-brew install --HEAD fantastical-cli
+brew install --HEAD vburojevic/tap/fantastical-cli
 ```
 
 ### Go install
