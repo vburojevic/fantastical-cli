@@ -18,6 +18,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -44,10 +46,10 @@ var (
 var errUsage = errors.New("usage")
 
 func main() {
-	os.Exit(run(os.Args, os.Stdout, os.Stderr))
+	os.Exit(run(os.Args, os.Stdin, os.Stdout, os.Stderr))
 }
 
-func run(args []string, out, errOut io.Writer) int {
+func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	if len(args) < 2 {
 		usage(errOut)
 		return 2
@@ -58,11 +60,11 @@ func run(args []string, out, errOut io.Writer) int {
 
 	switch cmd {
 	case "parse":
-		err = cmdParse(args[2:], out, errOut)
+		err = cmdParse(args[2:], in, out, errOut)
 	case "show":
 		err = cmdShow(args[2:], out, errOut)
 	case "applescript", "as":
-		err = cmdAppleScript(args[2:], out, errOut)
+		err = cmdAppleScript(args[2:], in, out, errOut)
 	case "completion":
 		err = cmdCompletion(args[2:], out, errOut)
 	case "help", "-h", "--help":
@@ -100,19 +102,21 @@ COMMANDS
   parse        Build (and optionally open) x-fantastical3://parse?... URLs
   show         Build (and optionally open) x-fantastical3://show/... URLs
   applescript  Send "parse sentence" to Fantastical via osascript (macOS)
-  completion   Print shell completion (bash|zsh|fish)
+  completion   Print or install shell completion (bash|zsh|fish)
   help         Show help for a command
   version      Print version information
 
 NOTES
   - On macOS, --open defaults to true (uses "open <url>").
   - On other OSes, --open defaults to false, so you'll typically use --print.
+  - Use --json for machine-readable output; use --plain for stable text output.
 
 EXAMPLES
   fantastical parse "Wake up at 8am" --add --calendar "Work" --note "Alarm"
   fantastical parse --print "Dinner with Sam tomorrow 7pm"
+  fantastical parse --stdin --json < input.txt
   fantastical show mini today
-  fantastical show calendar 2026-01-03
+  fantastical show month 2026-01-03
   fantastical show set "My Calendar Set"
   fantastical applescript --add "Wake up at 8am"
 `)
@@ -121,15 +125,15 @@ EXAMPLES
 func printSubcommandHelp(cmd string, w io.Writer) error {
 	switch strings.ToLower(cmd) {
 	case "parse":
-		fs, _ := newParseFlagSet(w)
+		fs, _ := newParseFlagSet(w, defaultParseOptions(nil))
 		fs.Usage()
 		return nil
 	case "show":
-		fs, _ := newShowFlagSet(w)
+		fs, _ := newShowFlagSet(w, defaultShowOptions(nil))
 		fs.Usage()
 		return nil
 	case "applescript", "as":
-		fs, _ := newAppleScriptFlagSet(w)
+		fs, _ := newAppleScriptFlagSet(w, defaultAppleScriptOptions(nil))
 		fs.Usage()
 		return nil
 	case "completion":
@@ -161,33 +165,97 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "%s %s\n", appName, versionString())
 }
 
+type outputOptions struct {
+	open    bool
+	print   bool
+	copy    bool
+	json    bool
+	plain   bool
+	dryRun  bool
+	verbose bool
+}
+
 type parseOptions struct {
+	outputOptions
 	note     string
 	calendar string
 	add      bool
-	open     bool
-	print    bool
-	copy     bool
+	stdin    bool
+	params   stringSlice
 }
 
-func newParseFlagSet(w io.Writer) (*flag.FlagSet, *parseOptions) {
-	opts := &parseOptions{
+func defaultOutputOptions(cfg *Config) outputOptions {
+	opts := outputOptions{
 		open: runtime.GOOS == "darwin",
 	}
+	if cfg == nil {
+		return opts
+	}
+	if cfg.Output.Open != nil {
+		opts.open = *cfg.Output.Open
+	}
+	if cfg.Output.Print != nil {
+		opts.print = *cfg.Output.Print
+	}
+	if cfg.Output.Copy != nil {
+		opts.copy = *cfg.Output.Copy
+	}
+	if cfg.Output.JSON != nil {
+		opts.json = *cfg.Output.JSON
+	}
+	if cfg.Output.Plain != nil {
+		opts.plain = *cfg.Output.Plain
+	}
+	if cfg.Output.DryRun != nil {
+		opts.dryRun = *cfg.Output.DryRun
+	}
+	if cfg.Output.Verbose != nil {
+		opts.verbose = *cfg.Output.Verbose
+	}
+	return opts
+}
+
+func defaultParseOptions(cfg *Config) parseOptions {
+	opts := parseOptions{
+		outputOptions: defaultOutputOptions(cfg),
+	}
+	if cfg == nil {
+		return opts
+	}
+	if strings.TrimSpace(cfg.Parse.Calendar) != "" {
+		opts.calendar = cfg.Parse.Calendar
+	}
+	if strings.TrimSpace(cfg.Parse.Note) != "" {
+		opts.note = cfg.Parse.Note
+	}
+	if cfg.Parse.Add != nil {
+		opts.add = *cfg.Parse.Add
+	}
+	return opts
+}
+
+func newParseFlagSet(w io.Writer, defaults parseOptions) (*flag.FlagSet, *parseOptions) {
+	opts := defaults
 
 	fs := flag.NewFlagSet("parse", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we'll print our own usage on error/help
 
-	fs.StringVar(&opts.note, "note", "", "Optional note (maps to n=...)")
-	fs.StringVar(&opts.note, "n", "", "Alias for --note")
+	fs.StringVar(&opts.note, "note", opts.note, "Optional note (maps to n=...)")
+	fs.StringVar(&opts.note, "n", opts.note, "Alias for --note")
 
-	fs.StringVar(&opts.calendar, "calendar", "", "Optional calendar name (maps to calendarName=...)")
-	fs.StringVar(&opts.calendar, "calendarName", "", "Alias for --calendar")
+	fs.StringVar(&opts.calendar, "calendar", opts.calendar, "Optional calendar name (maps to calendarName=...)")
+	fs.StringVar(&opts.calendar, "calendarName", opts.calendar, "Alias for --calendar")
 
-	fs.BoolVar(&opts.add, "add", false, "Add immediately without interaction (maps to add=1)")
+	fs.BoolVar(&opts.add, "add", opts.add, "Add immediately without interaction (maps to add=1)")
 	fs.BoolVar(&opts.open, "open", opts.open, "Open the generated URL via system opener")
-	fs.BoolVar(&opts.print, "print", false, "Print the generated URL to stdout")
-	fs.BoolVar(&opts.copy, "copy", false, "Copy the generated URL to clipboard (pbcopy/wl-copy/xclip/clip, if available)")
+	fs.BoolVar(&opts.print, "print", opts.print, "Print the generated URL to stdout")
+	fs.BoolVar(&opts.copy, "copy", opts.copy, "Copy the generated URL to clipboard (pbcopy/wl-copy/xclip/clip, if available)")
+	fs.BoolVar(&opts.json, "json", opts.json, "Print machine-readable JSON output")
+	fs.BoolVar(&opts.plain, "plain", opts.plain, "Print stable plain-text output")
+	fs.BoolVar(&opts.dryRun, "dry-run", opts.dryRun, "Preview only; do not open or copy")
+	fs.BoolVar(&opts.verbose, "verbose", opts.verbose, "Verbose output to stderr")
+	fs.BoolVar(&opts.stdin, "stdin", false, "Read sentence from stdin instead of args")
+	fs.Var(&opts.params, "param", "Extra Fantastical query param (key=value), repeatable")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical parse [flags] <sentence...>\n")
@@ -195,11 +263,16 @@ func newParseFlagSet(w io.Writer) (*flag.FlagSet, *parseOptions) {
 		fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical parse \"Wake up at 8am\" --add --calendar Work --note \"Alarm\"")
 	}
 
-	return fs, opts
+	return fs, &opts
 }
 
-func cmdParse(args []string, out, errOut io.Writer) error {
-	fs, opts := newParseFlagSet(errOut)
+func cmdParse(args []string, in io.Reader, out, errOut io.Writer) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	fs, opts := newParseFlagSet(errOut, defaultParseOptions(cfg))
 
 	if err := fs.Parse(args); err != nil {
 		// flag package returns flag.ErrHelp if -h/-help is used.
@@ -211,35 +284,64 @@ func cmdParse(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 
-	sentence := strings.TrimSpace(strings.Join(fs.Args(), " "))
-	if sentence == "" {
+	if opts.json && opts.plain {
+		return fmt.Errorf("%w: --json and --plain are mutually exclusive", errUsage)
+	}
+
+	sentence, err := readSentence(fs.Args(), opts.stdin, in)
+	if err != nil {
 		fs.Usage()
-		return fmt.Errorf("%w: missing <sentence...>", errUsage)
+		return err
 	}
 
-	u := buildParseURL(sentence, opts.note, opts.calendar, opts.add)
+	extraParams, err := parseParams(opts.params)
+	if err != nil {
+		fs.Usage()
+		return err
+	}
 
-	didSomething := false
+	u := buildParseURL(sentence, opts.note, opts.calendar, opts.add, extraParams)
 
-	if opts.print || (!opts.open && !opts.copy) {
+	if opts.dryRun {
+		opts.open = false
+		opts.copy = false
+	}
+
+	logVerbose(errOut, opts.verbose, "url: %s", u)
+	logVerbose(errOut, opts.verbose, "open=%t copy=%t dry-run=%t", opts.open, opts.copy, opts.dryRun)
+
+	didOutput := false
+
+	if opts.json {
+		payload := map[string]any{
+			"command":  "parse",
+			"sentence": sentence,
+			"url":      u,
+			"open":     opts.open,
+			"copy":     opts.copy,
+			"dry_run":  opts.dryRun,
+		}
+		if err := writeJSON(out, payload); err != nil {
+			return err
+		}
+		didOutput = true
+	} else if opts.print || opts.plain || (!opts.open && !opts.copy) {
 		fmt.Fprintln(out, u)
-		didSomething = true
+		didOutput = true
 	}
+
 	if opts.copy {
 		if err := copyToClipboard(u); err != nil {
 			return err
 		}
-		didSomething = true
 	}
 	if opts.open {
-		if err := openURL(u); err != nil {
+		if err := openURL(u, out, errOut); err != nil {
 			return err
 		}
-		didSomething = true
 	}
 
-	if !didSomething {
-		// Shouldn't happen because of the (!open && !copy) print fallback.
+	if !didOutput && !opts.open && !opts.copy {
 		fmt.Fprintln(out, u)
 	}
 
@@ -247,34 +349,45 @@ func cmdParse(args []string, out, errOut io.Writer) error {
 }
 
 type showOptions struct {
-	open  bool
-	print bool
-	copy  bool
+	outputOptions
+	params stringSlice
 }
 
-func newShowFlagSet(w io.Writer) (*flag.FlagSet, *showOptions) {
-	opts := &showOptions{
-		open: runtime.GOOS == "darwin",
-	}
+func defaultShowOptions(cfg *Config) showOptions {
+	return showOptions{outputOptions: defaultOutputOptions(cfg)}
+}
+
+func newShowFlagSet(w io.Writer, defaults showOptions) (*flag.FlagSet, *showOptions) {
+	opts := defaults
 
 	fs := flag.NewFlagSet("show", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
 	fs.BoolVar(&opts.open, "open", opts.open, "Open the generated URL via system opener")
-	fs.BoolVar(&opts.print, "print", false, "Print the generated URL to stdout")
-	fs.BoolVar(&opts.copy, "copy", false, "Copy the generated URL to clipboard (pbcopy/wl-copy/xclip/clip, if available)")
+	fs.BoolVar(&opts.print, "print", opts.print, "Print the generated URL to stdout")
+	fs.BoolVar(&opts.copy, "copy", opts.copy, "Copy the generated URL to clipboard (pbcopy/wl-copy/xclip/clip, if available)")
+	fs.BoolVar(&opts.json, "json", opts.json, "Print machine-readable JSON output")
+	fs.BoolVar(&opts.plain, "plain", opts.plain, "Print stable plain-text output")
+	fs.BoolVar(&opts.dryRun, "dry-run", opts.dryRun, "Preview only; do not open or copy")
+	fs.BoolVar(&opts.verbose, "verbose", opts.verbose, "Verbose output to stderr")
+	fs.Var(&opts.params, "param", "Extra Fantastical query param (key=value), repeatable")
 
 	fs.Usage = func() {
-		fmt.Fprint(w, "USAGE:\n  fantastical show [flags] mini|calendar [yyyy-mm-dd|today|tomorrow|yesterday]\n  fantastical show [flags] set <calendar-set-name...>\n")
+		fmt.Fprint(w, "USAGE:\n  fantastical show [flags] <view> [yyyy-mm-dd|today|tomorrow|yesterday]\n  fantastical show [flags] set <calendar-set-name...>\n")
 		fs.PrintDefaults()
-		fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical show mini today\n  fantastical show calendar 2026-01-03\n  fantastical show set \"My Calendar Set\"")
+		fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical show mini today\n  fantastical show calendar 2026-01-03\n  fantastical show month 2026-01-03\n  fantastical show set \"My Calendar Set\"")
 	}
 
-	return fs, opts
+	return fs, &opts
 }
 
 func cmdShow(args []string, out, errOut io.Writer) error {
-	fs, opts := newShowFlagSet(errOut)
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	fs, opts := newShowFlagSet(errOut, defaultShowOptions(cfg))
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -285,31 +398,26 @@ func cmdShow(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 
+	if opts.json && opts.plain {
+		return fmt.Errorf("%w: --json and --plain are mutually exclusive", errUsage)
+	}
+
 	rest := fs.Args()
 	if len(rest) < 1 {
 		fs.Usage()
-		return fmt.Errorf("%w: missing view (mini|calendar|set)", errUsage)
+		return fmt.Errorf("%w: missing view", errUsage)
 	}
 
 	sub := strings.ToLower(rest[0])
 
+	extraParams, err := parseParams(opts.params)
+	if err != nil {
+		fs.Usage()
+		return err
+	}
+
 	var u string
 	switch sub {
-	case "mini", "calendar":
-		if len(rest) > 2 {
-			fs.Usage()
-			return fmt.Errorf("%w: too many args for %q; expected: fantastical show %s [date]", errUsage, sub, sub)
-		}
-		if len(rest) == 2 {
-			d, err := parseDateArg(rest[1])
-			if err != nil {
-				return err
-			}
-			u = fantasticalScheme + "show/" + sub + "/" + d.Format("2006-01-02")
-		} else {
-			u = fantasticalScheme + "show/" + sub
-		}
-
 	case "set":
 		if len(rest) < 2 {
 			fs.Usage()
@@ -318,33 +426,70 @@ func cmdShow(args []string, out, errOut io.Writer) error {
 		name := strings.TrimSpace(strings.Join(rest[1:], " "))
 		q := url.Values{}
 		q.Set("name", name)
+		for key, vals := range extraParams {
+			for _, v := range vals {
+				q.Add(key, v)
+			}
+		}
 		u = fantasticalScheme + "show/set?" + encodeQuery(q)
-
 	default:
-		fs.Usage()
-		return fmt.Errorf("%w: unknown show target %q (want: mini, calendar, set)", errUsage, sub)
+		if len(rest) > 2 {
+			fs.Usage()
+			return fmt.Errorf("%w: too many args for %q; expected: fantastical show %s [date]", errUsage, sub, sub)
+		}
+		u = fantasticalScheme + "show/" + sub
+		if len(rest) == 2 {
+			d, err := parseDateArg(rest[1])
+			if err != nil {
+				return err
+			}
+			u = u + "/" + d.Format("2006-01-02")
+		}
+		if len(extraParams) > 0 {
+			u = u + "?" + encodeQuery(extraParams)
+		}
 	}
 
-	didSomething := false
+	if opts.dryRun {
+		opts.open = false
+		opts.copy = false
+	}
 
-	if opts.print || (!opts.open && !opts.copy) {
+	logVerbose(errOut, opts.verbose, "url: %s", u)
+	logVerbose(errOut, opts.verbose, "open=%t copy=%t dry-run=%t", opts.open, opts.copy, opts.dryRun)
+
+	didOutput := false
+
+	if opts.json {
+		payload := map[string]any{
+			"command": "show",
+			"view":    sub,
+			"url":     u,
+			"open":    opts.open,
+			"copy":    opts.copy,
+			"dry_run": opts.dryRun,
+		}
+		if err := writeJSON(out, payload); err != nil {
+			return err
+		}
+		didOutput = true
+	} else if opts.print || opts.plain || (!opts.open && !opts.copy) {
 		fmt.Fprintln(out, u)
-		didSomething = true
+		didOutput = true
 	}
+
 	if opts.copy {
 		if err := copyToClipboard(u); err != nil {
 			return err
 		}
-		didSomething = true
 	}
 	if opts.open {
-		if err := openURL(u); err != nil {
+		if err := openURL(u, out, errOut); err != nil {
 			return err
 		}
-		didSomething = true
 	}
 
-	if !didSomething {
+	if !didOutput && !opts.open && !opts.copy {
 		fmt.Fprintln(out, u)
 	}
 
@@ -352,22 +497,51 @@ func cmdShow(args []string, out, errOut io.Writer) error {
 }
 
 type appleScriptOptions struct {
-	add   bool
-	run   bool
-	print bool
+	add     bool
+	run     bool
+	print   bool
+	dryRun  bool
+	verbose bool
+	stdin   bool
 }
 
-func newAppleScriptFlagSet(w io.Writer) (*flag.FlagSet, *appleScriptOptions) {
-	opts := &appleScriptOptions{
+func defaultAppleScriptOptions(cfg *Config) appleScriptOptions {
+	opts := appleScriptOptions{
 		run: runtime.GOOS == "darwin",
 	}
+	if cfg == nil {
+		return opts
+	}
+	if cfg.AppleScript.Add != nil {
+		opts.add = *cfg.AppleScript.Add
+	}
+	if cfg.AppleScript.Run != nil {
+		opts.run = *cfg.AppleScript.Run
+	}
+	if cfg.AppleScript.Print != nil {
+		opts.print = *cfg.AppleScript.Print
+	}
+	if cfg.Output.DryRun != nil {
+		opts.dryRun = *cfg.Output.DryRun
+	}
+	if cfg.Output.Verbose != nil {
+		opts.verbose = *cfg.Output.Verbose
+	}
+	return opts
+}
+
+func newAppleScriptFlagSet(w io.Writer, defaults appleScriptOptions) (*flag.FlagSet, *appleScriptOptions) {
+	opts := defaults
 
 	fs := flag.NewFlagSet("applescript", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	fs.BoolVar(&opts.add, "add", false, "Use Fantastical AppleScript 'with add immediately'")
+	fs.BoolVar(&opts.add, "add", opts.add, "Use Fantastical AppleScript 'with add immediately'")
 	fs.BoolVar(&opts.run, "run", opts.run, "Run osascript (macOS only)")
-	fs.BoolVar(&opts.print, "print", false, "Print the AppleScript instead of (or in addition to) running it")
+	fs.BoolVar(&opts.print, "print", opts.print, "Print the AppleScript instead of (or in addition to) running it")
+	fs.BoolVar(&opts.dryRun, "dry-run", opts.dryRun, "Preview only; do not run osascript")
+	fs.BoolVar(&opts.verbose, "verbose", opts.verbose, "Verbose output to stderr")
+	fs.BoolVar(&opts.stdin, "stdin", false, "Read sentence from stdin instead of args")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical applescript|as [flags] <sentence...>\n")
@@ -375,11 +549,16 @@ func newAppleScriptFlagSet(w io.Writer) (*flag.FlagSet, *appleScriptOptions) {
 		fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical applescript --add \"Wake up at 8am\"")
 	}
 
-	return fs, opts
+	return fs, &opts
 }
 
-func cmdAppleScript(args []string, out, errOut io.Writer) error {
-	fs, opts := newAppleScriptFlagSet(errOut)
+func cmdAppleScript(args []string, in io.Reader, out, errOut io.Writer) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	fs, opts := newAppleScriptFlagSet(errOut, defaultAppleScriptOptions(cfg))
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -390,10 +569,17 @@ func cmdAppleScript(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 
-	sentence := strings.TrimSpace(strings.Join(fs.Args(), " "))
-	if sentence == "" {
+	if opts.dryRun {
+		opts.run = false
+		if !opts.print {
+			opts.print = true
+		}
+	}
+
+	sentence, err := readSentence(fs.Args(), opts.stdin, in)
+	if err != nil {
 		fs.Usage()
-		return fmt.Errorf("%w: missing <sentence...>", errUsage)
+		return err
 	}
 
 	scriptLines := []string{
@@ -418,13 +604,14 @@ func cmdAppleScript(args []string, out, errOut io.Writer) error {
 	}
 
 	if !opts.run {
-		// If they didn't ask to run, printing is enough.
 		return nil
 	}
 
 	if runtime.GOOS != "darwin" {
 		return errors.New("applescript --run is only supported on macOS (osascript); use --print to output the script")
 	}
+
+	logVerbose(errOut, opts.verbose, "running osascript (add=%t)", opts.add)
 
 	osascriptArgs := make([]string, 0, len(scriptLines)*2+3)
 	for _, line := range scriptLines {
@@ -436,13 +623,18 @@ func cmdAppleScript(args []string, out, errOut io.Writer) error {
 	}
 	osascriptArgs = append(osascriptArgs, "--", sentence, addArg)
 
-	cmd := exec.Command("osascript", osascriptArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmdName := osascriptCommand()
+	cmd := exec.Command(cmdName, osascriptArgs...)
+	cmd.Stdout = out
+	cmd.Stderr = errOut
 	return cmd.Run()
 }
 
 type completionOptions struct{}
+
+type completionInstallOptions struct {
+	path string
+}
 
 func newCompletionFlagSet(w io.Writer) (*flag.FlagSet, *completionOptions) {
 	opts := &completionOptions{}
@@ -451,8 +643,8 @@ func newCompletionFlagSet(w io.Writer) (*flag.FlagSet, *completionOptions) {
 	fs.SetOutput(io.Discard)
 
 	fs.Usage = func() {
-		fmt.Fprint(w, "USAGE:\n  fantastical completion [bash|zsh|fish]\n")
-		fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical completion zsh")
+		fmt.Fprint(w, "USAGE:\n  fantastical completion [bash|zsh|fish]\n  fantastical completion install [--path <path>] [bash|zsh|fish]\n")
+		fmt.Fprintln(w, "\nEXAMPLES:\n  fantastical completion zsh\n  fantastical completion install fish")
 	}
 
 	return fs, opts
@@ -470,27 +662,87 @@ func cmdCompletion(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 
+	rest := fs.Args()
+	if len(rest) < 1 {
+		fs.Usage()
+		return fmt.Errorf("%w: missing shell name (bash|zsh|fish)", errUsage)
+	}
+
+	if rest[0] == "install" {
+		return cmdCompletionInstall(rest[1:], out, errOut)
+	}
+
+	shell := strings.ToLower(strings.TrimSpace(rest[0]))
+	script, err := completionScript(shell)
+	if err != nil {
+		fs.Usage()
+		return err
+	}
+
+	fmt.Fprintln(out, script)
+	return nil
+}
+
+func cmdCompletionInstall(args []string, out, errOut io.Writer) error {
+	fs := flag.NewFlagSet("completion install", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	opts := completionInstallOptions{}
+	fs.StringVar(&opts.path, "path", "", "Install path (defaults to a user-local location)")
+
+	fs.Usage = func() {
+		fmt.Fprint(errOut, "USAGE:\n  fantastical completion install [--path <path>] [bash|zsh|fish]\n")
+		fmt.Fprintln(errOut, "\nEXAMPLE:\n  fantastical completion install zsh")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return nil
+		}
+		fs.Usage()
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+
 	if fs.NArg() != 1 {
 		fs.Usage()
 		return fmt.Errorf("%w: missing shell name (bash|zsh|fish)", errUsage)
 	}
 
 	shell := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
-	var script string
-	switch shell {
-	case "bash":
-		script = bashCompletion()
-	case "zsh":
-		script = zshCompletion()
-	case "fish":
-		script = fishCompletion()
-	default:
+	script, err := completionScript(shell)
+	if err != nil {
 		fs.Usage()
-		return fmt.Errorf("%w: unknown shell %q (want: bash, zsh, fish)", errUsage, shell)
+		return err
 	}
 
-	fmt.Fprintln(out, script)
+	path := opts.path
+	if path == "" {
+		path, err = defaultCompletionPath(shell)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := writeFileWithDirs(path, []byte(script)); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "installed completion to %s\n", path)
 	return nil
+}
+
+func completionScript(shell string) (string, error) {
+	switch shell {
+	case "bash":
+		return bashCompletion(), nil
+	case "zsh":
+		return zshCompletion(), nil
+	case "fish":
+		return fishCompletion(), nil
+	default:
+		return "", fmt.Errorf("%w: unknown shell %q (want: bash, zsh, fish)", errUsage, shell)
+	}
 }
 
 func bashCompletion() string {
@@ -507,12 +759,12 @@ func bashCompletion() string {
 
   case "${COMP_WORDS[1]}" in
     parse)
-      local flags="--note -n --calendar --calendarName --add --open --print --copy --help"
+      local flags="--note -n --calendar --calendarName --add --open --print --copy --json --plain --dry-run --verbose --stdin --param --help"
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     show)
-      local flags="--open --print --copy --help"
-      local subs="mini calendar set"
+      local flags="--open --print --copy --json --plain --dry-run --verbose --param --help"
+      local subs="mini calendar day week month agenda set"
       if [[ $COMP_CWORD -eq 2 ]]; then
         COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
         return 0
@@ -520,14 +772,15 @@ func bashCompletion() string {
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
       ;;
     applescript|as)
-      local flags="--add --run --print --help"
+      local flags="--add --run --print --dry-run --verbose --stdin --help"
       COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+      ;;
+    completion)
+      local subs="install bash zsh fish"
+      COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
       ;;
     help)
       COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
-      ;;
-    completion)
-      COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") )
       ;;
   esac
 }
@@ -568,22 +821,36 @@ _fantastical() {
             '--add[Add immediately]' \
             '--open[Open URL]' \
             '--print[Print URL]' \
-            '--copy[Copy URL]'
+            '--copy[Copy URL]' \
+            '--json[JSON output]' \
+            '--plain[Plain output]' \
+            '--dry-run[Preview only]' \
+            '--verbose[Verbose output]' \
+            '--stdin[Read from stdin]' \
+            '--param[Extra query param]'
           ;;
         show)
-          _arguments '1:target:(mini calendar set)' '*:date or name:' \
+          _arguments '1:target:(mini calendar day week month agenda set)' '*:date or name:' \
             '--open[Open URL]' \
             '--print[Print URL]' \
-            '--copy[Copy URL]'
+            '--copy[Copy URL]' \
+            '--json[JSON output]' \
+            '--plain[Plain output]' \
+            '--dry-run[Preview only]' \
+            '--verbose[Verbose output]' \
+            '--param[Extra query param]'
           ;;
         applescript|as)
           _arguments '*:sentence:' \
             '--add[Add immediately]' \
             '--run[Run osascript]' \
-            '--print[Print script]'
+            '--print[Print script]' \
+            '--dry-run[Preview only]' \
+            '--verbose[Verbose output]' \
+            '--stdin[Read from stdin]'
           ;;
         completion)
-          _arguments '1:shell:(bash zsh fish)'
+          _arguments '1:sub:(install bash zsh fish)'
           ;;
         help)
           _arguments '1:command:(parse show applescript completion help version)'
@@ -608,21 +875,35 @@ complete -c fantastical -n '__fish_seen_subcommand_from parse' -l add -d 'Add im
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l open -d 'Open URL'
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l print -d 'Print URL'
 complete -c fantastical -n '__fish_seen_subcommand_from parse' -l copy -d 'Copy URL'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l json -d 'JSON output'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l plain -d 'Plain output'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l dry-run -d 'Preview only'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l verbose -d 'Verbose output'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l stdin -d 'Read from stdin'
+complete -c fantastical -n '__fish_seen_subcommand_from parse' -l param -d 'Extra query param'
 
-complete -c fantastical -n '__fish_seen_subcommand_from show' -a 'mini calendar set' -d 'Show target'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -a 'mini calendar day week month agenda set' -d 'Show target'
 complete -c fantastical -n '__fish_seen_subcommand_from show' -l open -d 'Open URL'
 complete -c fantastical -n '__fish_seen_subcommand_from show' -l print -d 'Print URL'
 complete -c fantastical -n '__fish_seen_subcommand_from show' -l copy -d 'Copy URL'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l json -d 'JSON output'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l plain -d 'Plain output'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l dry-run -d 'Preview only'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l verbose -d 'Verbose output'
+complete -c fantastical -n '__fish_seen_subcommand_from show' -l param -d 'Extra query param'
 
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l add -d 'Add immediately'
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l run -d 'Run osascript'
 complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l print -d 'Print script'
+complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l dry-run -d 'Preview only'
+complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l verbose -d 'Verbose output'
+complete -c fantastical -n '__fish_seen_subcommand_from applescript' -l stdin -d 'Read from stdin'
 
-complete -c fantastical -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish' -d 'Shell'
+complete -c fantastical -n '__fish_seen_subcommand_from completion' -a 'install bash zsh fish' -d 'Shell'
 complete -c fantastical -n '__fish_seen_subcommand_from help' -a 'parse show applescript completion help version' -d 'Command'`
 }
 
-func buildParseURL(sentence, note, calendar string, add bool) string {
+func buildParseURL(sentence, note, calendar string, add bool, extra url.Values) string {
 	q := url.Values{}
 	q.Set("s", sentence)
 	if strings.TrimSpace(note) != "" {
@@ -634,6 +915,11 @@ func buildParseURL(sentence, note, calendar string, add bool) string {
 	if add {
 		q.Set("add", "1")
 	}
+	for key, vals := range extra {
+		for _, v := range vals {
+			q.Add(key, v)
+		}
+	}
 	return fantasticalScheme + "parse?" + encodeQuery(q)
 }
 
@@ -644,29 +930,57 @@ func encodeQuery(v url.Values) string {
 	return strings.ReplaceAll(enc, "+", "%20")
 }
 
-func openURL(u string) error {
-	var cmd *exec.Cmd
+func openURL(u string, out, errOut io.Writer) error {
+	cmdName, cmdArgs, err := openCommand(u)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(cmdName, cmdArgs...)
+	cmd.Stdout = out
+	cmd.Stderr = errOut
+	return cmd.Run()
+}
+
+func openCommand(u string) (string, []string, error) {
+	if override := strings.TrimSpace(os.Getenv("FANTASTICAL_OPEN_COMMAND")); override != "" {
+		parts := strings.Fields(override)
+		if len(parts) == 0 {
+			return "", nil, errors.New("FANTASTICAL_OPEN_COMMAND is empty")
+		}
+		return parts[0], append(parts[1:], u), nil
+	}
 
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", u)
+		return "open", []string{u}, nil
 	case "linux":
-		cmd = exec.Command("xdg-open", u)
+		return "xdg-open", []string{u}, nil
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", u)
+		return "rundll32", []string{"url.dll,FileProtocolHandler", u}, nil
 	default:
-		return fmt.Errorf("don't know how to open URLs on %s (use --print)", runtime.GOOS)
+		return "", nil, fmt.Errorf("don't know how to open URLs on %s (use --print)", runtime.GOOS)
 	}
+}
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+func osascriptCommand() string {
+	if override := strings.TrimSpace(os.Getenv("FANTASTICAL_OSASCRIPT_COMMAND")); override != "" {
+		parts := strings.Fields(override)
+		if len(parts) > 0 {
+			return parts[0]
+		}
+	}
+	return "osascript"
 }
 
 func copyToClipboard(text string) error {
 	switch runtime.GOOS {
 	case "darwin":
-		cmd := exec.Command("pbcopy")
+		path, err := exec.LookPath("pbcopy")
+		if err != nil {
+			return errors.New("pbcopy not found (install Xcode command line tools or use --print)")
+		}
+		cmd := exec.Command(path)
 		cmd.Stdin = strings.NewReader(text)
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -732,4 +1046,95 @@ func parseDateArg(s string) (time.Time, error) {
 		}
 		return t, nil
 	}
+}
+
+func readSentence(args []string, fromStdin bool, in io.Reader) (string, error) {
+	if fromStdin {
+		if len(args) > 0 {
+			return "", fmt.Errorf("%w: cannot use args with --stdin", errUsage)
+		}
+		data, err := io.ReadAll(in)
+		if err != nil {
+			return "", fmt.Errorf("%w: read stdin: %v", errUsage, err)
+		}
+		sentence := strings.TrimSpace(string(data))
+		if sentence == "" {
+			return "", fmt.Errorf("%w: empty stdin", errUsage)
+		}
+		return sentence, nil
+	}
+
+	sentence := strings.TrimSpace(strings.Join(args, " "))
+	if sentence == "" {
+		return "", fmt.Errorf("%w: missing <sentence...>", errUsage)
+	}
+	return sentence, nil
+}
+
+func parseParams(params []string) (url.Values, error) {
+	q := url.Values{}
+	for _, raw := range params {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		parts := strings.SplitN(raw, "=", 2)
+		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+			return nil, fmt.Errorf("%w: invalid param %q (want key=value)", errUsage, raw)
+		}
+		key := strings.TrimSpace(parts[0])
+		value := ""
+		if len(parts) == 2 {
+			value = strings.TrimSpace(parts[1])
+		}
+		q.Add(key, value)
+	}
+	return q, nil
+}
+
+func writeJSON(w io.Writer, payload any) error {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(payload)
+}
+
+func logVerbose(w io.Writer, verbose bool, format string, args ...any) {
+	if !verbose {
+		return
+	}
+	fmt.Fprintf(w, "[fantastical] "+format+"\n", args...)
+}
+
+func defaultCompletionPath(shell string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("could not determine home directory: %w", err)
+	}
+
+	switch shell {
+	case "bash":
+		if runtime.GOOS == "darwin" {
+			if _, err := os.Stat("/opt/homebrew"); err == nil {
+				return "/opt/homebrew/etc/bash_completion.d/fantastical", nil
+			}
+			return "/usr/local/etc/bash_completion.d/fantastical", nil
+		}
+		return home + "/.local/share/bash-completion/completions/fantastical", nil
+	case "zsh":
+		return home + "/.zsh/completions/_fantastical", nil
+	case "fish":
+		return home + "/.config/fish/completions/fantastical.fish", nil
+	default:
+		return "", fmt.Errorf("%w: unknown shell %q (want: bash, zsh, fish)", errUsage, shell)
+	}
+}
+
+func writeFileWithDirs(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }

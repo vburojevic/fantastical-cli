@@ -11,6 +11,7 @@
 *.dylib
 *.test
 *.out
+coverage.out
 
 # IDE/editor
 .idea/
