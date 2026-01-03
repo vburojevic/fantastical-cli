@@ -1,3 +1,3 @@
-module github.com/vedranburojevic/fantastical-cli
+module github.com/vburojevic/fantastical-cli
 
 go 1.21

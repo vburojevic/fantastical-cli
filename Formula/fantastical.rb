@@ -1,7 +1,7 @@
 class Fantastical < Formula
   desc "CLI for Fantastical URL handler and AppleScript"
-  homepage "https://github.com/vedranburojevic/fantastical-cli"
-  head "https://github.com/vedranburojevic/fantastical-cli.git", branch: "main"
+  homepage "https://github.com/vburojevic/fantastical-cli"
+  head "https://github.com/vburojevic/fantastical-cli.git", branch: "main"
   license "MIT"
 
   depends_on "go" => :build

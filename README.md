@@ -9,7 +9,7 @@ A tiny CLI wrapper around Fantastical's URL handler and AppleScript integration.
 This repo ships a Homebrew formula. Once this repo is on GitHub, you can:
 
 ```sh
-brew tap vedranburojevic/fantastical-cli
+brew tap vburojevic/fantastical-cli
 brew install fantastical
 ```
 
@@ -22,7 +22,7 @@ brew install --HEAD fantastical
 ### Go install
 
 ```sh
-go install github.com/vedranburojevic/fantastical-cli@latest
+go install github.com/vburojevic/fantastical-cli@latest
 ```
 
 ## Usage
