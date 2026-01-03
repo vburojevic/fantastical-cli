@@ -1256,10 +1256,6 @@ func gretaCapabilitiesMarkdown() string {
 `
 }
 
-type explainOptions struct {
-	command string
-}
-
 func explainUsage(w io.Writer) {
 	fmt.Fprint(w, "USAGE:\n  fantastical explain <command>\n")
 	fmt.Fprintln(w, "\nEXAMPLE:\n  fantastical explain parse")

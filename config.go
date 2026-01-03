@@ -45,10 +45,6 @@ type AppleScriptConfig struct {
 	Print *bool `json:"print"`
 }
 
-func loadConfig() (*Config, error) {
-	return loadConfigWithPath("")
-}
-
 func loadConfigWithPath(path string) (*Config, error) {
 	cfg := &Config{}
 

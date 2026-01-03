@@ -525,7 +525,7 @@ func TestConfigDefaults(t *testing.T) {
 
 func TestConfigOverrideFlag(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
-	config := `{"output":{"print":true},"parse":{"calendar":"Home"}}`
+	config := `{"output":{"print":true,"open":false},"parse":{"calendar":"Home"}}`
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
