@@ -66,6 +66,7 @@ fantastical eventkit status --json
 fantastical eventkit calendars --json
 fantastical eventkit events --next-week --calendar "Work"
 fantastical eventkit events --days 7 --query "standup"
+fantastical eventkit events --refresh --wait 20 --interval 2 --query "test"
 fantastical greta --format json
 fantastical help --json parse
 fantastical man --format json

@@ -24,6 +24,9 @@ struct Options {
     var sort: String = "start"
     var timezone: String? = nil
     var query: String? = nil
+    var refresh: Bool = false
+    var waitSeconds: Int? = nil
+    var intervalSeconds: Int? = nil
 }
 
 func eprintln(_ message: String) {
@@ -41,7 +44,8 @@ USAGE:
                  [--calendar <name>] [--calendar-id <id>]
                  [--query <text>] [--sort start|end|title|calendar]
                  [--tz <iana>] [--limit N]
-                 [--include-all-day] [--include-declined]
+                 [--include-all-day] [--include-declined] [--refresh]
+                 [--wait <seconds>] [--interval <seconds>]
                  [--format plain|json|table] [--no-input]
 
 DATE FORMATS:
@@ -176,6 +180,34 @@ func parseArgs(_ args: [String]) -> (String, Options)? {
                 return nil
             }
             opts.query = args[i]
+        case "--refresh":
+            opts.refresh = true
+        case "--wait":
+            i += 1
+            if i >= args.count {
+                eprintln("missing value for --wait")
+                usage()
+                return nil
+            }
+            if let value = Int(args[i]) {
+                opts.waitSeconds = value
+            } else {
+                eprintln("invalid --wait value: \(args[i])")
+                return nil
+            }
+        case "--interval":
+            i += 1
+            if i >= args.count {
+                eprintln("missing value for --interval")
+                usage()
+                return nil
+            }
+            if let value = Int(args[i]) {
+                opts.intervalSeconds = value
+            } else {
+                eprintln("invalid --interval value: \(args[i])")
+                return nil
+            }
         case "--help", "-h":
             usage()
             return nil
@@ -245,6 +277,15 @@ func resolveDateRange(_ opts: Options) -> (Date, Date)? {
     }
     if opts.days != nil && (opts.from != nil || opts.to != nil) {
         eprintln("--days cannot be combined with --from/--to")
+        return nil
+    }
+
+    if let waitSeconds = opts.waitSeconds, waitSeconds < 0 {
+        eprintln("--wait must be >= 0")
+        return nil
+    }
+    if let interval = opts.intervalSeconds, interval <= 0 {
+        eprintln("--interval must be > 0")
         return nil
     }
 
@@ -591,47 +632,65 @@ if let (command, opts) = parseArgs(args) {
             }
         }
 
-        let predicate = store.predicateForEvents(withStart: fromDate, end: toDate, calendars: calendars)
-        var events = store.events(matching: predicate)
-
-        if let query = opts.query?.lowercased(), !query.isEmpty {
-            events = events.filter { event in
-                let title = (event.title ?? "").lowercased()
-                let location = (event.location ?? "").lowercased()
-                let notes = (event.notes ?? "").lowercased()
-                return title.contains(query) || location.contains(query) || notes.contains(query)
-            }
+        if opts.refresh {
+            store.refreshSourcesIfNecessary()
         }
 
-        if !opts.includeAllDay {
-            events = events.filter { !$0.isAllDay }
-        }
-        if !opts.includeDeclined {
-            events = events.filter { !isDeclinedByCurrentUser($0) }
-        }
+        func fetchEvents() -> [EKEvent] {
+            let predicate = store.predicateForEvents(withStart: fromDate, end: toDate, calendars: calendars)
+            var events = store.events(matching: predicate)
 
-        switch opts.sort.lowercased() {
-        case "start":
-            events.sort { $0.startDate < $1.startDate }
-        case "end":
-            events.sort { $0.endDate < $1.endDate }
-        case "title":
-            events.sort { ($0.title ?? "").lowercased() < ($1.title ?? "").lowercased() }
-        case "calendar":
-            events.sort {
-                let lhs = $0.calendar.title.lowercased()
-                let rhs = $1.calendar.title.lowercased()
-                if lhs == rhs {
-                    return $0.startDate < $1.startDate
+            if let query = opts.query?.lowercased(), !query.isEmpty {
+                events = events.filter { event in
+                    let title = (event.title ?? "").lowercased()
+                    let location = (event.location ?? "").lowercased()
+                    let notes = (event.notes ?? "").lowercased()
+                    return title.contains(query) || location.contains(query) || notes.contains(query)
                 }
-                return lhs < rhs
             }
-        default:
-            events.sort { $0.startDate < $1.startDate }
+
+            if !opts.includeAllDay {
+                events = events.filter { !$0.isAllDay }
+            }
+            if !opts.includeDeclined {
+                events = events.filter { !isDeclinedByCurrentUser($0) }
+            }
+
+            switch opts.sort.lowercased() {
+            case "start":
+                events.sort { $0.startDate < $1.startDate }
+            case "end":
+                events.sort { $0.endDate < $1.endDate }
+            case "title":
+                events.sort { ($0.title ?? "").lowercased() < ($1.title ?? "").lowercased() }
+            case "calendar":
+                events.sort {
+                    let lhs = $0.calendar.title.lowercased()
+                    let rhs = $1.calendar.title.lowercased()
+                    if lhs == rhs {
+                        return $0.startDate < $1.startDate
+                    }
+                    return lhs < rhs
+                }
+            default:
+                events.sort { $0.startDate < $1.startDate }
+            }
+
+            if let limit = opts.limit, limit > 0, events.count > limit {
+                events = Array(events.prefix(limit))
+            }
+
+            return events
         }
 
-        if let limit = opts.limit, limit > 0, events.count > limit {
-            events = Array(events.prefix(limit))
+        var events = fetchEvents()
+        if let waitSeconds = opts.waitSeconds, waitSeconds > 0 {
+            let interval = Double(opts.intervalSeconds ?? 2)
+            let deadline = Date().addingTimeInterval(Double(waitSeconds))
+            while events.isEmpty && Date() < deadline {
+                Thread.sleep(forTimeInterval: interval)
+                events = fetchEvents()
+            }
         }
 
         outputEvents(events, format: format, timeZone: outputTimeZone ?? TimeZone.current)

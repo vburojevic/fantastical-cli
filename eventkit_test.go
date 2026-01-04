@@ -41,7 +41,7 @@ func TestCmdEventKitEventsArgs(t *testing.T) {
 	t.Setenv("FANTASTICAL_EVENTKIT_HELPER", helper)
 
 	var out, errOut bytes.Buffer
-	args := []string{"events", "--format", "json", "--calendar", "Work", "--calendar-id", "abc123", "--from", "2026-01-03", "--sort", "title", "--query", "standup"}
+	args := []string{"events", "--format", "json", "--calendar", "Work", "--calendar-id", "abc123", "--from", "2026-01-03", "--sort", "title", "--query", "standup", "--refresh", "--wait", "10", "--interval", "2"}
 	if err := cmdEventKit(args, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,6 +63,15 @@ func TestCmdEventKitEventsArgs(t *testing.T) {
 	}
 	if !strings.Contains(output, "--query") || !strings.Contains(output, "standup") {
 		t.Fatalf("expected query args in output: %q", output)
+	}
+	if !strings.Contains(output, "--refresh") {
+		t.Fatalf("expected refresh arg in output: %q", output)
+	}
+	if !strings.Contains(output, "--wait") || !strings.Contains(output, "10") {
+		t.Fatalf("expected wait args in output: %q", output)
+	}
+	if !strings.Contains(output, "--interval") || !strings.Contains(output, "2") {
+		t.Fatalf("expected interval args in output: %q", output)
 	}
 }
 

@@ -81,6 +81,7 @@ fantastical eventkit calendars --json
 fantastical eventkit events --next-week --calendar "Work"
 fantastical eventkit events --days 7 --query "standup"
 fantastical eventkit events --calendar-id "ABC123" --format table --tz "America/Los_Angeles"
+fantastical eventkit events --refresh --wait 20 --interval 2 --query "test"
 ```
 
 ## Input

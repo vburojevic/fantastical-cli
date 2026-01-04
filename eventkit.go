@@ -45,6 +45,9 @@ type eventKitEventsOptions struct {
 	sort            string
 	timezone        string
 	query           string
+	refresh         bool
+	waitSeconds     int
+	intervalSeconds int
 }
 
 type eventKitStatusOptions struct {
@@ -104,11 +107,14 @@ func newEventKitEventsFlagSet(w io.Writer) (*flag.FlagSet, *eventKitEventsOption
 	fs.StringVar(&opts.sort, "sort", "start", "Sort by start|end|title|calendar")
 	fs.StringVar(&opts.timezone, "tz", "", "Timezone for output (IANA name)")
 	fs.StringVar(&opts.query, "query", "", "Filter by title/location/notes (case-insensitive)")
+	fs.BoolVar(&opts.refresh, "refresh", false, "Refresh calendar sources before querying")
+	fs.IntVar(&opts.waitSeconds, "wait", 0, "Wait up to N seconds for events to appear")
+	fs.IntVar(&opts.intervalSeconds, "interval", 2, "Polling interval in seconds when using --wait")
 
 	fs.Usage = func() {
 		fmt.Fprint(w, "USAGE:\n  fantastical eventkit events [flags]\n")
 		fs.PrintDefaults()
-		fmt.Fprintln(w, "\nNOTES:\n  Requires Calendar access; macOS will prompt on first use.\n  Date shortcuts (--today/--tomorrow/--this-week/--next-week/--days) are mutually exclusive with --from/--to.")
+		fmt.Fprintln(w, "\nNOTES:\n  Requires Calendar access; macOS will prompt on first use.\n  Date shortcuts (--today/--tomorrow/--this-week/--next-week/--days) are mutually exclusive with --from/--to.\n  --wait polls until a matching event appears or the timeout expires.")
 	}
 
 	return fs, opts
@@ -299,6 +305,15 @@ func cmdEventKitEvents(args []string, out, errOut io.Writer) error {
 	}
 	if strings.TrimSpace(opts.query) != "" {
 		helperArgs = append(helperArgs, "--query", strings.TrimSpace(opts.query))
+	}
+	if opts.refresh {
+		helperArgs = append(helperArgs, "--refresh")
+	}
+	if opts.waitSeconds > 0 {
+		helperArgs = append(helperArgs, "--wait", fmt.Sprintf("%d", opts.waitSeconds))
+	}
+	if opts.intervalSeconds > 0 {
+		helperArgs = append(helperArgs, "--interval", fmt.Sprintf("%d", opts.intervalSeconds))
 	}
 
 	return runEventKitHelper(helperArgs, out, errOut, opts.verbose)

@@ -1120,6 +1120,9 @@ func gretaSpec(schema string) map[string]any {
 					"--sort start|end|title|calendar",
 					"--tz IANA",
 					"--query text",
+					"--refresh",
+					"--wait seconds",
+					"--interval seconds",
 				},
 			},
 			{
@@ -1396,6 +1399,7 @@ Examples:
   fantastical eventkit status --json
   fantastical eventkit calendars --format table
   fantastical eventkit events --next-week --calendar "Work"
+  fantastical eventkit events --refresh --wait 20 --interval 2 --query "test"
 
 Note:
   macOS will prompt for Calendar access on first use. Use --no-input to fail instead of prompting.
@@ -1930,7 +1934,10 @@ _fantastical() {
                 '--include-declined[Include declined events]' \
                 '--sort[Sort order]' \
                 '--tz[Timezone]' \
-                '--query[Query text]'
+                '--query[Query text]' \
+                '--refresh[Refresh sources]' \
+                '--wait[Wait seconds]' \
+                '--interval[Polling interval seconds]'
               ;;
             *)
               _arguments '1:sub:(status calendars events)'
@@ -2033,6 +2040,9 @@ complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l include-dec
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l sort -d 'Sort order'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l tz -d 'Timezone'
 complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l query -d 'Query text'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l refresh -d 'Refresh sources'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l wait -d 'Wait seconds'
+complete -c fantastical -n '__fish_seen_subcommand_from eventkit' -l interval -d 'Polling interval seconds'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l format -d 'Format'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l schema -d 'Schema'
 complete -c fantastical -n '__fish_seen_subcommand_from greta' -l examples -d 'Examples only'
