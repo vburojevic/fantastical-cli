@@ -35,6 +35,7 @@ macOS only (Fantastical is a macOS app).
 ## EventKit
 
 `eventkit` commands access the system Calendar database via EventKit. macOS will prompt for Calendar access on first use. The helper is compiled with `swiftc` (Xcode Command Line Tools) the first time you run an `eventkit` command.
+`--refresh` is best-effort; remote calendars may still take time to sync.
 
 ## Configuration
 

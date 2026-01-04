@@ -370,6 +370,24 @@ func resolveDateRange(_ opts: Options) -> (Date, Date)? {
     return (fromDate, toDate)
 }
 
+func requestCalendarAccess(store: EKEventStore) -> Bool {
+    let semaphore = DispatchSemaphore(value: 0)
+    var granted = false
+    if #available(macOS 14.0, *) {
+        store.requestFullAccessToEvents { ok, _ in
+            granted = ok
+            semaphore.signal()
+        }
+    } else {
+        store.requestAccess(to: .event) { ok, _ in
+            granted = ok
+            semaphore.signal()
+        }
+    }
+    _ = semaphore.wait(timeout: .now() + 30)
+    return granted
+}
+
 func ensureAuthorized(store: EKEventStore, noInput: Bool) -> Bool {
     let status = EKEventStore.authorizationStatus(for: .event)
     switch status {
@@ -385,13 +403,7 @@ func ensureAuthorized(store: EKEventStore, noInput: Bool) -> Bool {
             eprintln("Calendar access not granted. Re-run without --no-input to trigger the permission prompt.")
             return false
         }
-        let semaphore = DispatchSemaphore(value: 0)
-        var granted = false
-        store.requestAccess(to: .event) { ok, _ in
-            granted = ok
-            semaphore.signal()
-        }
-        _ = semaphore.wait(timeout: .now() + 30)
+        let granted = requestCalendarAccess(store: store)
         if !granted {
             eprintln("Calendar access denied.")
         }
@@ -637,6 +649,9 @@ if let (command, opts) = parseArgs(args) {
         }
 
         func fetchEvents() -> [EKEvent] {
+            if opts.refresh {
+                store.refreshSourcesIfNecessary()
+            }
             let predicate = store.predicateForEvents(withStart: fromDate, end: toDate, calendars: calendars)
             var events = store.events(matching: predicate)
 
