@@ -363,7 +363,7 @@ func newParseFlagSet(w io.Writer, defaults parseOptions) (*flag.FlagSet, *parseO
 	fs.BoolVar(&opts.add, "add", opts.add, "Add immediately without interaction (maps to add=1)")
 	fs.BoolVar(&opts.open, "open", opts.open, "Open the generated URL via system opener")
 	fs.BoolVar(&opts.print, "print", opts.print, "Print the generated URL to stdout")
-	fs.BoolVar(&opts.copy, "copy", opts.copy, "Copy the generated URL to clipboard (pbcopy/wl-copy/xclip/clip, if available)")
+	fs.BoolVar(&opts.copy, "copy", opts.copy, "Copy the generated URL to clipboard (pbcopy)")
 	fs.BoolVar(&opts.json, "json", opts.json, "Print machine-readable JSON output")
 	fs.BoolVar(&opts.plain, "plain", opts.plain, "Print stable plain-text output")
 	fs.BoolVar(&opts.dryRun, "dry-run", opts.dryRun, "Preview only; do not open or copy")
@@ -493,7 +493,7 @@ func newShowFlagSet(w io.Writer, defaults showOptions) (*flag.FlagSet, *showOpti
 
 	fs.BoolVar(&opts.open, "open", opts.open, "Open the generated URL via system opener")
 	fs.BoolVar(&opts.print, "print", opts.print, "Print the generated URL to stdout")
-	fs.BoolVar(&opts.copy, "copy", opts.copy, "Copy the generated URL to clipboard (pbcopy/wl-copy/xclip/clip, if available)")
+	fs.BoolVar(&opts.copy, "copy", opts.copy, "Copy the generated URL to clipboard (pbcopy)")
 	fs.BoolVar(&opts.json, "json", opts.json, "Print machine-readable JSON output")
 	fs.BoolVar(&opts.plain, "plain", opts.plain, "Print stable plain-text output")
 	fs.BoolVar(&opts.dryRun, "dry-run", opts.dryRun, "Preview only; do not open or copy")

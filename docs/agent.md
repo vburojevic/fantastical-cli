@@ -43,7 +43,7 @@ Use `--json` with `parse`, `show`, `validate`, and `doctor` for machine-readable
 - macOS only (Fantastical is a macOS app).
 - `--dry-run` disables opening/copying URLs.
 - For `parse`/`applescript`, put flags before the sentence or use `--` to separate.
-- `eventkit` commands use EventKit and will prompt for Calendar access on first use.
+- `eventkit` commands use EventKit and will prompt for Calendar access on first use (macOS 14+ full‑access APIs).
 - The EventKit helper is compiled with `swiftc` on first use (requires Xcode Command Line Tools).
 - Use `--format` for table output, `--query` to filter, and `--calendar-id` for stable selection.
 - Use `--refresh --wait <seconds> --interval <seconds>` to poll until a newly created event appears.

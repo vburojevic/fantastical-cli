@@ -378,14 +378,12 @@ func requestCalendarAccess(store: EKEventStore) -> Bool {
             granted = ok
             semaphore.signal()
         }
-    } else {
-        store.requestAccess(to: .event) { ok, _ in
-            granted = ok
-            semaphore.signal()
-        }
+        _ = semaphore.wait(timeout: .now() + 30)
+        return granted
     }
-    _ = semaphore.wait(timeout: .now() + 30)
-    return granted
+
+    eprintln("Calendar access requires macOS 14 or newer.")
+    return false
 }
 
 func ensureAuthorized(store: EKEventStore, noInput: Bool) -> Bool {

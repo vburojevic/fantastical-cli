@@ -71,7 +71,7 @@ fantastical parse --add --calendar "Personal" -- "Test event today at 22:00"
 
 ## EventKit access
 
-`eventkit` commands read calendars and events via EventKit. macOS will prompt for Calendar access on first use. The helper is compiled with `swiftc` (Xcode Command Line Tools) the first time you run an `eventkit` command.
+`eventkit` commands read calendars and events via EventKit. macOS will prompt for Calendar access on first use. The helper is compiled with `swiftc` (Xcode Command Line Tools) the first time you run an `eventkit` command. EventKit access requires macOS 14+ (uses the latest full‑access APIs).
 `--refresh` is best-effort; remote calendars may still take time to sync.
 
 Examples:
